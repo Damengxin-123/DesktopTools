@@ -1,0 +1,199 @@
+/********基本窗口的样式*********/
+#uMainCellWidget {
+    background-color: rgba(255, 255, 255, 0);
+/*    border: 1px solid rgba(0, 0, 0, 0.2);*/
+    border-radius: 5px;
+}
+#uMenuButList {
+    background-color: rgba(253, 254, 255,0);
+    border-left: none;
+    border-top: none;
+    border-right: 1px solid rgb(177, 177, 177);
+    border-bottom: none;
+}
+#uMenuButListLayoutWidget {
+    background-color: rgba(253, 254, 255,0);
+    border: none;
+}
+#uButTool {
+    background-color: #f0f4f7;
+    border:none;
+    color: rgb(27, 32, 41);
+    font-size: 18px;
+    font-weight: bold;
+    font-family: '楷体';
+    text-align: left; /* 文本左对齐 */
+    padding-left: 10px; /* 控制图标+文本的左边距 */
+}
+#uButTool:hover {
+    color: rgb(66, 122, 233);
+}
+#uButTool:checked {
+    color: rgb(66, 122, 233);
+}
+#uButShowMin {
+    border-image: url(:/images/min.svg) 0 0 0 0 stretch stretch;
+    background-color: rgba(0,0,0,0);
+}
+#uButShowMax {
+    border-image: url(:/images/max.png);
+    background-color: rgba(0,0,0,0);
+}
+#uButClose {
+    border-image: url(:/images/close.svg) 0 0 0 0 stretch stretch;
+    background-color: rgba(0,0,0,0);
+}
+
+#uCustomWidget {
+    background-color: rgba(66, 93, 146);
+}
+#uCustomTitleidget {
+    background-color: rgba(255, 255, 255,0);
+    border-radius: 5px;
+}
+#uCustomOuterWidget {
+    background-color: rgba(230, 237, 248,220);
+}
+#uToolMenuWidget {
+    background-color: rgba(15, 68, 160,150);
+}
+#uTitleText {
+    font-size: 30px;
+    color: rgb(138, 138, 138);
+    font-weight: bold;
+}
+#uMenuList{
+    background-color:rgba(0,0,0,0);
+}
+#uSearchWidget {
+    background-color: rgba(232, 241, 244,255);
+    /*    border: 2px solid rgba(0, 0, 0, 0.3);*/
+    border-radius: 5px;
+}
+#uInputSearch {
+    background-color: rgba(255,255,255,0);
+    border: none;
+}
+#uButSearch {
+    border-image: url(:/images/search.svg);
+    background-color: rgba(0,0,0,0);
+}
+/************************248, 254, 252****/
+/******************嵌套窗口样式**********************/
+#uCellWidget {
+    background-color: #fcfdff;
+    border-radius: 5px;
+}
+/*******************登录界面***********************/
+#LxLoginWidget QLineEdit {
+    background-color: rgba(232, 241, 244,255);
+    color: #4e5661;
+    border-radius: 5px;
+    padding: 5px;
+    font-size: 16px;
+}
+#LxLoginWidget QPushButton {
+    background-color: #3776f6;
+    border-radius: 3px;
+    color: #fafeff;
+    padding: 5px;
+    font-size: 16px;
+}
+/********************便签界面************************/
+#uNoteTitleInput {
+    background-color: rgba(232, 241, 244,255);
+    color: #4e5661;
+    border-radius: 5px;
+    padding: 5px;
+    font-size: 16px;
+}
+#uNoteDataInput {
+    background-color: rgba(232, 241, 244,255);
+    color: #4e5661;
+    border-radius: 5px;
+    padding: 5px;
+    font-size: 16px;
+}
+#uButSaveNote {
+    background-color: #3776f6;
+    border-radius: 3px;
+    color: #fafeff;
+    padding: 5px;
+    font-size: 16px;
+}
+#uButClearNoteData {
+    background-color: #00000000;
+    border: 1px solid #3776f6;
+    border-radius: 3px;
+    color: #4e5661;
+    padding: 5px;
+    font-size: 16px;
+}
+#uNoteListWidget {
+    background-color: rgb(232, 241, 244);
+    border-top: none;
+    border-right: none;
+    border-bottom: none;
+}
+#uButSelectAllNoteList, #uButRemoveSelectedNotes {
+    background-color: #3776f6;
+    border-radius: 3px;
+    color: #fafeff;
+    padding: 5px;
+    font-size: 16px;
+}
+/***********************快捷方式界面***************************/
+#uShortcutTitleInput, #uShortcutPathInput{
+    background-color: rgba(232, 241, 244,255);
+    color: #4e5661;
+    border-radius: 5px;
+    padding: 5px;
+    font-size: 16px;
+}
+#uButOpenDir, #uButOpenFile, #uButAddShortcut, #uButRemoveSelectedShortcuts, #uButSelectAllShortcutList {
+    background-color: #3776f6;
+    border-radius: 3px;
+    color: #fafeff;
+    padding: 5px;
+    font-size: 16px;
+}
+#uComboxShortcutType {
+    background-color: rgba(232, 241, 244,255);
+    color: #4e5661;
+    border-radius: 5px;
+    padding: 5px;
+    font-size: 16px;
+}
+#uShortcutListWidget {
+    background-color: rgb(232, 241, 244);
+    border-top: none;
+    border-right: none;
+    border-bottom: none;
+    font-size: 16px;
+    color: #4e5661;
+}
+QComboBox {
+    border: none; /* 隐藏整个控件的边框 */
+    background: transparent; /* 背景透明 */
+}
+
+/* 下拉按钮区域（右边的小箭头区域） */
+QComboBox::drop-down {
+    border: none; /* 隐藏下拉按钮边框 */
+    background: transparent; /* 背景透明 */
+    width: 20px; /* 调整箭头区域宽度 */
+}
+
+/* 下拉箭头本身 */
+QComboBox::down-arrow {
+    image: url(:/images/drop-down.png); /* 自定义箭头图标 */
+    width: 20px;
+    height: 20px;
+}
+
+/* 下拉列表 */
+QComboBox QAbstractItemView {
+    border: none; /* 隐藏下拉列表边框 */
+    outline: 0px; /* 去掉焦点虚线 */
+    selection-background-color: #e0e0e0; /* 可选：下拉项高亮颜色 */
+}
