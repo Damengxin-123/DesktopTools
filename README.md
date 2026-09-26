@@ -1,2 +1,119 @@
-本项目用于将日常工作中常用的工具集成到同一个软件中，例如：便签、网页书签、文件书签等。
-同时，计划在后期将所有用户数据存储在Sqlite中，便于用户更换电脑，且会提供相关数据分享功能。
+# DesktopTool 桌面工具
+
+使用 **Qt 原生窗口 + HTML/CSS/JavaScript + QWebChannel + Qt 业务服务** 的 Windows 桌面工具。页面通过 Qt 资源系统随程序打包，离线运行，不需要 Node.js、npm 或本地 HTTP 服务。
+
+## 功能与架构
+
+- **快捷方式**：目录、网址、文件的分类管理、搜索、编辑、批量删除与排序，由 Qt 调用系统打开目标。
+- **便签**：分类管理、富文本编辑与图片保存；Qt 负责内容过滤、文件访问及数据保存。
+- **设置**：字号、全局热键和恢复默认设置。热键注册及设置写入一起成功后生效。
+- **系统集成**：托盘、默认 F8 唤醒、单实例唤醒及兼容旧版本的实例标识。有托盘时关闭窗口会隐藏，真正退出使用托盘菜单。
+
+本次迁移包含上述三个页面。旧版的登录、下载和日志占位页面未纳入新版。
+
+```text
+HTML 页面 → web/bridge.js → QWebChannel → AppBridge → Qt 业务服务 → 数据文件
+                                             └→ 文件选择、剪贴板、系统热键
+```
+
+| 目录 | 用途 |
+| --- | --- |
+| `src/app/` | 原生窗口、WebEngine 安全边界、托盘和全局热键 |
+| `src/bridge/` | 唯一网页接口 `AppBridge`，协调系统操作和服务调用 |
+| `src/services/` | 快捷方式、便签和设置服务，校验数据并原子写入 |
+| `web/` | HTML、CSS、JavaScript 页面与异步桥接封装 |
+| `resources/` | 应用图标、Windows 资源及将网页编译进应用的 Qt 资源清单 |
+| `tests/` | 服务回归测试和真实 WebEngine / WebChannel 集成测试 |
+| `pack/` | 安装到本机目录或生成便携发布目录的包装脚本 |
+
+仓库以新版 `src/` 和 `web/` 为活动代码，不再包含旧版 `code/`、编译缓存或预先打包的 Qt 运行库。旧版源码可从 Git 历史查看；用户数据格式的兼容与迁移继续由新版服务提供。
+
+页面只负责展示和交互；数据校验、读写、打开文件及系统集成由 Qt 处理。便签 HTML 经后端重建，资源请求和页面导航受限，外部网页不会加载到承载原生接口的页面中。
+
+## 构建与运行
+
+需要 Windows x64、MSVC x64 C++ 工具链、CMake 3.21 或更新版本、Ninja，以及 **Qt 6.8 或更新版本的 MSVC x64 套件**。Qt 组件需包含 `Core`、`Gui`、`Widgets`、`Network`、`WebChannel`、`WebEngineWidgets`；默认启用测试，还需 `Test`。项目使用 C++17。
+
+先打开 Visual Studio 的 **x64 Native Tools Command Prompt（x64 原生工具命令提示符）**，进入克隆的仓库根目录。CMake 和 Ninja 需位于 `PATH`。以下使用已验证的 Qt 6.10.3 举例，请将 Qt 路径替换为自己的安装位置：
+
+```bat
+set "QT_ROOT=C:\Qt\6.10.3\msvc2022_64"
+set "PATH=%QT_ROOT%\bin;%PATH%"
+cmake --preset x64-release -DCMAKE_PREFIX_PATH="%QT_ROOT%"
+cmake --build --preset x64-release
+ctest --preset x64-release
+```
+
+开发者命令提示符负责初始化 MSVC x64 编译器环境，也可手动调用 Visual Studio 安装目录下的 `Common7\Tools\VsDevCmd.bat -arch=x64 -host_arch=x64`。Qt 的 `bin` 加入 `PATH` 供开发运行及测试加载 DLL。若 Ninja 未加入 `PATH`，把其安装目录一并加入，或在配置命令中指定 `-DCMAKE_MAKE_PROGRAM=完整路径`。
+
+项目不固定开发者机器上的 Qt 安装路径。使用 `-DCMAKE_PREFIX_PATH` 指定完整套件，或将个人配置写入已忽略的 `CMakeUserPresets.json`。
+
+调试版本将三个命令的 preset 改为 `x64-debug`。输出分别为：
+
+- 发布构建：`out/build/web-x64-release/bin/DesktopTool.exe`
+- 调试构建：`out/build/web-x64-debug/bin/DesktopTool.exe`
+
+切换 Qt 套件时需清理旧配置缓存，例如 CMake 3.24 及以上可执行 `cmake --fresh --preset x64-release -DCMAKE_PREFIX_PATH="完整Qt套件路径"`，随后重新构建。头文件、导入库和运行时 DLL 必须来自同一完整套件。
+
+从开发构建启动时，默认数据目录也在该可执行文件旁。要使用原来的数据，请指定其路径：
+
+```bat
+out\build\web-x64-release\bin\DesktopTool.exe --data-dir "D:\DesktopTool\data"
+```
+
+## 测试
+
+`ctest --preset x64-release` 或 `ctest --preset x64-debug` 执行配置中的测试。测试使用独立临时目录，不读取真实便签与快捷方式数据。
+
+- `catalog-services`：旧快捷方式导入、稳定标识、分类与排序、重复校验、损坏文件保护和设置兼容。
+- `note-service`：便签迁移、图片处理、内容过滤、路径边界、保存失败回滚和排序。
+- `web-integration`：在真实 WebEngine 和 WebChannel 中验证页面与 Qt 后端调用；测试关闭托盘和全局热键，使用离屏模式。
+
+测试结果以当前构建运行时的 CTest 输出为准。真实系统的托盘、热键占用和最终发布目录运行仍需在目标 Windows 环境检查。
+
+## 本机更新与便携发布
+
+完成发布构建并退出正在运行的应用后执行：
+
+```bat
+pack\copy_lib.bat
+```
+
+该脚本使用 `cmake --install out/build/web-x64-release --prefix out/bin` 更新原有本机程序目录，保留原来 `out/bin/data`。之后从 `out/bin/DesktopTool.exe` 启动即可继续使用原数据。
+
+生成便携发布目录：
+
+```bat
+pack\pack_app.bat
+```
+
+该脚本使用相同的 CMake 安装流程部署到 `pack/app`。Qt 官方部署脚本会部署应用依赖、WebEngine 子进程、资源和语言包，分发时应包含整个目录。两个包装脚本均检查错误码，且不移动、删除或自动复制用户数据。如果发布目标目录已有历史数据，发布前自行确认是否适合分发。
+
+脚本使用 `PATH` 中的 `cmake.exe`；也可通过 `DESKTOPTOOL_CMAKE` 环境变量指定 CMake 可执行文件。变量值只填写路径，不附加命令参数。例如：
+
+```bat
+set "DESKTOPTOOL_CMAKE=C:\Program Files\CMake\bin\cmake.exe"
+pack\pack_app.bat
+```
+
+## 数据与迁移
+
+默认使用 **可执行文件旁的 `data` 目录**；通过 `--data-dir` 可指定其他位置。迁移前建议备份该目录。第一次运行新版时，仅在缺少新版索引的情况下导入旧数据：
+
+| 数据 | 新版位置与兼容行为 |
+| --- | --- |
+| 快捷方式 | `data/shortcut/shortcuts.v2.json`，保存版本号、稳定 ID、分类及顺序；从旧 `shortcuts_config.txt` 导入并保留原文件 |
+| 便签索引 | `data/note/notes.v2.json`，导入旧索引和便签目录；旧便签首次编辑时保存至按稳定 ID 命名的新目录，保留原目录 |
+| 便签内容 | 保存为 HTML；合法图片由服务处理。删除便签仅移除索引记录，磁盘内容保留，可用于人工恢复 |
+| 设置 | 继续使用 `data/setting/system_config.json`，兼容 `tree_view_font_size`、`hotkey_modifier`、`hotkey_key`，保留其他未知字段 |
+
+旧逗号分隔快捷方式存在无法无歧义识别的行时，会返回中文导入警告，不猜测字段，也不会更改原文件。新版 JSON 或索引损坏时，相关服务会报告错误并禁止覆盖；修复或从备份恢复文件后重启应用。删除过的便签不会在下次启动时自动重新导入。
+
+## 扩展页面与接口
+
+1. 在 `src/services/` 实现业务规则及存储，新增类型、函数和成员写中文注释；避免依赖具体网页控件。
+2. 在 `AppBridge` 添加 `Q_INVOKABLE` 方法，返回 `ServiceResult::success(data)` 或 `ServiceResult::failure(中文错误)`。只传递可序列化的业务字段及稳定 ID。
+3. 在 `web/` 通过 `await desktopBridge.call("方法名", 参数)` 调用。桥接封装会把失败结果转换为异常；服务成功保存后发出变更信号，页面通过 `desktopBridge.on("信号名", 回调)` 刷新数据。
+4. 新增网页文件时更新 `resources/app.qrc`，新增 C++ 文件时更新 `CMakeLists.txt`。补充涉及数据迁移、保存或系统交互的回归验证。
+
+不要把任意文件路径执行、命令执行或任意外部页面访问直接暴露成网页接口。数据读写继续放在 Qt 服务中，页面资源继续随应用打包。

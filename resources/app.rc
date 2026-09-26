@@ -1,0 +1,2 @@
+// Windows 可执行程序使用的应用图标。
+IDI_APP_ICON ICON "images/app_icon.ico"
