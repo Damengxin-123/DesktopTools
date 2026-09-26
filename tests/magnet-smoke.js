@@ -42,6 +42,17 @@
   async function task(id) { return (await call("getDownloads")).items.find(function matchingTask(item) { return item.id === id; }); }
   // 返回当前任务卡片，任务 ID 由 Qt 生成。
   function card(id) { return element('[data-download-id="' + id + '"]'); }
+  // 检查真实解析卡片的文本与等待时间，兼容尚未提供发现诊断字段的后端。
+  function checkResolvingPresentation(current) {
+    const view = document.querySelector('[data-download-id="' + current.id + '"]'); // 卡片刷新可能晚于本次原生快照。
+    if (current.status !== "resolving" || !view || view.dataset.status !== "resolving") return;
+    const discovery = view.querySelector(".download-bytes"); // 发现提示必须保持单纯文本，不能创建动态 HTML。
+    const elapsed = view.querySelector(".download-speed"); // 元数据阶段使用原速度位置展示实际等待时间。
+    check(discovery.childElementCount === 0 && discovery.textContent.trim().length > 0, "解析节点提示缺失或被解释为 HTML");
+    check(elapsed.childElementCount === 0 && /^(?:—|已等待 \d+ 秒|已等待 \d+ 分 \d+ 秒)$/.test(elapsed.textContent), "解析等待时间不是清晰的纯文本");
+    if (!current.discoveryMessage) check(discovery.textContent === "正在寻找可用节点并获取文件列表…", "缺少发现诊断时没有保留原有解析提示");
+    if (current.metadataElapsedSeconds === undefined) check(elapsed.textContent === "—", "缺少后端计时数据时界面虚构了等待时长");
+  }
   // 检查文件弹窗是否确实属于指定任务并已加载所有文件。
   function filesReady(id, expectedCount) {
     const dialog = element("#download-files-dialog");
@@ -65,7 +76,11 @@
     element('[data-page="downloads"]').click();
     const created = await createFromForm();
     check(created.kind === "magnet", "创建表单没有将磁力链接识别为磁力任务");
-    await waitFor(async function metadataResolved() { return (await task(created.id)).status === "awaiting_selection"; }, "磁力任务未获取文件列表");
+    await waitFor(async function metadataResolved() {
+      const current = await task(created.id); // 在真实解析等待期间检查呈现，不替换桥接或伪造后端数据。
+      checkResolvingPresentation(current);
+      return current.status === "awaiting_selection";
+    }, "磁力任务未获取文件列表");
     await waitFor(function selectionPresented() { return filesReady(created.id, fixture.files.length); }, "获取元数据后没有自动显示文件选择框");
     const waiting = await task(created.id);
     check(!waiting.selectionConfirmed && waiting.bytesReceived === 0, "确认文件前已经开始内容下载");

@@ -318,7 +318,7 @@ int main(int argc, char** argv)
 {
     QApplication app(argc, argv);
     app.setApplicationName(QStringLiteral("DesktopToolWebTest"));
-    app.setApplicationVersion(QStringLiteral("2.2.0-test"));
+    app.setApplicationVersion(QStringLiteral("2.2.1-test"));
     WebSmokeTest test;
     return QTest::qExec(&test, argc, argv);
 }

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(DesktopTool VERSION 2.2.0 LANGUAGES CXX)
+project(DesktopTool VERSION 2.2.1 LANGUAGES CXX)
 
 # Qt 安装位置由 CMAKE_PREFIX_PATH、Qt6_DIR 或用户本地预设提供。
 set(CMAKE_CXX_STANDARD 17)
