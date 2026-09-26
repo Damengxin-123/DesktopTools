@@ -87,6 +87,13 @@
     return amount.toFixed(unit === 0 ? 0 : (amount < 10 ? 2 : 1)) + " " + units[unit];
   }
 
+  // 只展示后端提供的有效等待时长，旧版本未提供时保留占位，不推测时间。
+  function formatMetadataElapsed(value) {
+    if (!Number.isSafeInteger(value) || value < 0) return "—";
+    if (value < 60) return "已等待 " + value + " 秒";
+    return "已等待 " + Math.floor(value / 60) + " 分 " + value % 60 + " 秒";
+  }
+
   // 计算可展示的进度；只有后端完成状态且总大小已知时显示 100%。
   function progressFor(task) {
     const received = Math.max(0, Number(task.bytesReceived) || 0);
@@ -187,8 +194,9 @@
     const fileCount = Math.max(0, Number(task.fileCount) || 0); // 元数据就绪后的文件总数。
     const selectedCount = Math.max(0, Number(task.selectedCount) || 0); // 后端实际确认的文件数量。
     const transferBytes = formatBytes(progress.received) + " / " + (progress.known ? formatBytes(progress.total) : "大小未知"); // 已确认任务的真实传输量。
-    setText(view.bytes, resolving ? "正在寻找可用节点并获取文件列表…" : (awaiting ? fileCount + " 个文件 · 确认后开始下载" : transferBytes + (task.kind === "magnet" && task.selectionConfirmed ? " · 已选 " + selectedCount + " 个文件" : "")));
-    setText(view.speed, task.status === "downloading" ? formatBytes(task.speed) + "/s" : "—");
+    const discoveryMessage = typeof task.discoveryMessage === "string" && task.discoveryMessage.trim() ? task.discoveryMessage : "正在寻找可用节点并获取文件列表…"; // 后端发现状态按纯文本呈现，缺失时兼容原提示。
+    setText(view.bytes, resolving ? discoveryMessage : (awaiting ? fileCount + " 个文件 · 确认后开始下载" : transferBytes + (task.kind === "magnet" && task.selectionConfirmed ? " · 已选 " + selectedCount + " 个文件" : "")));
+    setText(view.speed, resolving ? formatMetadataElapsed(task.metadataElapsedSeconds) : (task.status === "downloading" ? formatBytes(task.speed) + "/s" : "—"));
     view.progress.setAttribute("aria-label", title + "的下载进度");
     view.progress.classList.toggle("indeterminate", resolving || (!awaiting && !progress.known));
     view.progress.classList.toggle("running", task.status === "downloading" || resolving);

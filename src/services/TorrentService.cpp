@@ -43,6 +43,15 @@ constexpr qint64 MaximumBytes = 16 * 1024 * 1024;
 constexpr int MaximumFiles = 10000;
 /** 独立目录内用于确认任务所有权的标记文件。 */
 const QString OwnerFile = QStringLiteral(".desktoptool-magnet-owner");
+/** 使用引擎文档列出的多个入口，单个域名解析异常时仍能进入 DHT 网络。 */
+constexpr const char* BootstrapNodes = "dht.libtorrent.org:25401,dht.transmissionbt.com:6881,router.bittorrent.com:6881,router.bt.ouinet.work:6881";
+
+/** 只有显式回环节点且没有 tracker 的任务使用封闭的本机发现流程。 */
+bool localDiscovery(const lt::add_torrent_params& params)
+{
+    return params.trackers.empty() && !params.peers.empty()
+        && std::all_of(params.peers.begin(), params.peers.end(), [](const auto& peer) { return peer.address().is_loopback(); });
+}
 
 /** 将 libtorrent 使用的 UTF-8 路径转换为 Qt 字符串。 */
 QString fromUtf8(const std::string& text) { return QString::fromUtf8(text.data(), qsizetype(text.size())); }
@@ -192,6 +201,13 @@ struct TorrentService::State {
         bool confirmed = false;       ///< 用户是否明确确认过文件选择。
         bool cleanupPending = false;  ///< 已取消任务是否仍在等待安全清理。
         bool finishing = false;       ///< 完成下载后是否正在关闭文件句柄。
+        bool publicTask = false;      ///< 本次启动是否需要公网节点发现。
+        int knownPeers = 0;           ///< 引擎已发现的文件来源数量，不代表来源仍在线。
+        int connectedPeers = 0;       ///< 当前完成连接的文件来源数量。
+        qint64 metadataElapsedSeconds = 0; ///< 本次解析持续的秒数，暂停后停止更新。
+        qint64 lastDhtRequest = -30000; ///< 最近一次主动查询的单调时钟毫秒值。
+        bool pendingDhtQuery = false; ///< 网络就绪事件要求补查，限频期间保留到下次轮询再发送。
+        QElapsedTimer metadataClock;  ///< 仅统计当前解析尝试，重新开始时清零。
         QSet<int> selected;            ///< 用户明确选择的文件索引。
         QVariantList fileList;        ///< 已安全校验且不包含填充文件的缓存列表。
         lt::info_hash_t hashes;        ///< 从磁力链接解析的原始内容哈希。
@@ -212,6 +228,10 @@ struct TorrentService::State {
     QTimer* timer;                    ///< 合并状态与进度更新的轮询计时器。
     QElapsedTimer checkpoint;         ///< 限制下载进度写盘频率。
     bool publicDiscovery = false;     ///< 是否已经显式启用公网 DHT 发现。
+    QHash<QString, int> dhtNodes;      ///< 分监听端点统计路由节点，避免 IPv6 空表覆盖 IPv4 结果。
+    QElapsedTimer discoveryClock;     ///< 限制会话统计与主动查询的频率。
+    qint64 lastDhtStats = -1000;       ///< 上次请求路由统计的毫秒值。
+    QString networkIssue;             ///< 最近一次 DHT 或监听错误，供解析阶段说明原因。
 
     /** 建立纯磁盘状态；构造和历史读取均不创建网络会话。 */
     State(TorrentService* service, const QString& dataRoot)
@@ -223,6 +243,7 @@ struct TorrentService::State {
         timer->setInterval(250);
         QObject::connect(timer, &QTimer::timeout, owner, [this] { poll(); });
         checkpoint.start();
+        discoveryClock.start();
         load();
     }
     /** 停止事件源并等待网络库刷新其拥有的文件。 */
@@ -247,6 +268,35 @@ struct TorrentService::State {
     }
     /** 元数据缓存路径始终从已验证的任务标识推导。 */
     QString metadataPath(const Task& task) const { return QDir(metadataRoot).filePath(task.id + QStringLiteral(".torrent")); }
+    /** 汇总不同监听端点的有效路由节点。 */
+    int dhtNodeCount() const
+    {
+        int count = 0;
+        for (int nodes : dhtNodes)
+            count += nodes;
+        return count;
+    }
+    /** 解释当前解析停留的阶段，不把缺少来源误报成文件下载超时。 */
+    QString discoveryMessage(const Task& task) const
+    {
+        if (task.status != QStringLiteral("resolving"))
+            return {};
+        if (task.connectedPeers > 0)
+            return QStringLiteral("已连接 %1 个文件来源，正在获取文件信息…").arg(task.connectedPeers);
+        if (task.knownPeers > 0)
+            return QStringLiteral("已发现 %1 个文件来源，正在尝试连接…").arg(task.knownPeers);
+        if (task.publicTask && dhtNodeCount() > 0)
+            return task.metadataElapsedSeconds < 60
+                ? QStringLiteral("已接入资源网络，正在寻找在线文件来源…")
+                : QStringLiteral("已接入资源网络，暂未找到在线文件来源，可继续等待或暂停后重试。");
+        if (!task.publicTask)
+            return QStringLiteral("正在连接指定文件来源并获取文件信息…");
+        if (task.metadataElapsedSeconds >= 15 && !networkIssue.isEmpty())
+            return QStringLiteral("资源网络连接遇到问题：") + networkIssue;
+        return task.metadataElapsedSeconds < 30
+            ? QStringLiteral("正在通过多个入口连接资源网络…")
+            : QStringLiteral("尚未连接到资源网络，正在等待备用入口回应；请检查网络是否允许 UDP 通信。");
+    }
     /** 生成网页和持久化共享的基础字段。 */
     QVariantMap taskData(const Task& task) const
     {
@@ -255,7 +305,10 @@ struct TorrentService::State {
             {QStringLiteral("status"), task.status}, {QStringLiteral("bytesReceived"), task.received}, {QStringLiteral("totalBytes"), task.total},
             {QStringLiteral("speed"), task.speed}, {QStringLiteral("error"), task.error}, {QStringLiteral("warning"), task.warning},
             {QStringLiteral("createdAt"), task.createdAt}, {QStringLiteral("fileCount"), task.fileList.size()},
-            {QStringLiteral("selectedCount"), task.selected.size()}, {QStringLiteral("selectionConfirmed"), task.confirmed}};
+            {QStringLiteral("selectedCount"), task.selected.size()}, {QStringLiteral("selectionConfirmed"), task.confirmed},
+            {QStringLiteral("discoveryMessage"), discoveryMessage(task)}, {QStringLiteral("metadataElapsedSeconds"), task.metadataElapsedSeconds},
+            {QStringLiteral("dhtNodes"), task.publicTask ? dhtNodeCount() : 0},
+            {QStringLiteral("knownPeers"), task.knownPeers}, {QStringLiteral("connectedPeers"), task.connectedPeers}};
     }
     /** 检查根目录、缓存目录和索引本身的链接边界。 */
     bool safeStore() const
@@ -420,6 +473,8 @@ struct TorrentService::State {
     void load();
     /** 创建需要的网络会话，本地测试节点不会启用公网发现。 */
     void ensureSession(const lt::add_torrent_params& params);
+    /** 记录网络就绪事件并发送待处理查询，限频不能丢弃尚未执行的补查。 */
+    void requestMetadataPeers(bool networkEvent = false);
     /** 根据明确确认过的文件选择启动任务。 */
     bool start(const TaskPtr& task, QString& error);
     /** 标记失败并停用当前句柄，保留可恢复的文件。 */
@@ -531,8 +586,7 @@ void TorrentService::State::load()
 
 void TorrentService::State::ensureSession(const lt::add_torrent_params& params)
 {
-    const bool localOnly = params.trackers.empty() && !params.peers.empty()
-        && std::all_of(params.peers.begin(), params.peers.end(), [](const auto& peer) { return peer.address().is_loopback(); });
+    const bool localOnly = localDiscovery(params);
     if (!session) {
         lt::settings_pack settings;
         settings.set_str(lt::settings_pack::listen_interfaces, "0.0.0.0:0,[::]:0");
@@ -540,15 +594,35 @@ void TorrentService::State::ensureSession(const lt::add_torrent_params& params)
         settings.set_bool(lt::settings_pack::enable_natpmp, false);
         settings.set_bool(lt::settings_pack::enable_lsd, false);
         settings.set_bool(lt::settings_pack::enable_dht, !localOnly);
-        settings.set_int(lt::settings_pack::alert_mask, lt::alert_category::error | lt::alert_category::status | lt::alert_category::storage);
+        settings.set_str(lt::settings_pack::dht_bootstrap_nodes, localOnly ? "" : BootstrapNodes);
+        settings.set_int(lt::settings_pack::alert_mask, lt::alert_category::error | lt::alert_category::status | lt::alert_category::storage | lt::alert_category::dht);
         session = std::make_unique<lt::session>(settings);
         publicDiscovery = !localOnly;
         timer->start();
     } else if (!localOnly && !publicDiscovery) {
         lt::settings_pack settings;
+        settings.set_str(lt::settings_pack::dht_bootstrap_nodes, BootstrapNodes);
         settings.set_bool(lt::settings_pack::enable_dht, true);
         session->apply_settings(settings);
         publicDiscovery = true;
+        dhtNodes.clear();
+        networkIssue.clear();
+        lastDhtStats = -1000;
+    }
+}
+
+void TorrentService::State::requestMetadataPeers(bool networkEvent)
+{
+    const qint64 now = discoveryClock.elapsed();
+    for (const auto& task : tasks) {
+        if (!task->publicTask || task->status != QStringLiteral("resolving") || !task->handle.is_valid())
+            continue;
+        task->pendingDhtQuery = task->pendingDhtQuery || networkEvent;
+        if (task->pendingDhtQuery && dhtNodeCount() > 0 && now - task->lastDhtRequest >= 30000) {
+            task->handle.force_dht_announce();
+            task->lastDhtRequest = now;
+            task->pendingDhtQuery = false;
+        }
     }
 }
 
@@ -566,10 +640,17 @@ bool TorrentService::State::start(const TaskPtr& task, QString& error)
         QString normalized;
         if (!parseMagnet(task->magnet, original, normalized, error))
             return false;
+        task->publicTask = !localDiscovery(original);
         ensureSession(original);
         task->status = task->confirmed ? QStringLiteral("downloading") : QStringLiteral("resolving");
         task->error.clear();
         task->speed = 0;
+        if (!task->confirmed) {
+            task->metadataClock.restart();
+            task->metadataElapsedSeconds = 0;
+            task->lastDhtRequest = -30000;
+            task->pendingDhtQuery = task->publicTask;
+        }
         if (!persist(error)) {
             task->status = QStringLiteral("paused");
             return false;
@@ -708,6 +789,36 @@ void TorrentService::State::poll()
     std::vector<lt::alert*> alerts;
     session->pop_alerts(&alerts);
     for (const auto* alert : alerts) {
+        // 引导和路由统计属于会话事件，必须在筛选单项任务事件之前处理。
+        if (const auto* stats = lt::alert_cast<lt::dht_stats_alert>(alert)) {
+            if (!publicDiscovery)
+                continue;
+            const int previous = dhtNodeCount();
+            int nodes = 0;
+            for (const auto& bucket : stats->routing_table)
+                nodes += bucket.num_nodes;
+            const QString endpoint = fromUtf8(stats->local_endpoint.address().to_string())
+                + QLatin1Char(':') + QString::number(stats->local_endpoint.port());
+            dhtNodes.insert(endpoint, nodes);
+            if (previous == 0 && dhtNodeCount() > 0) {
+                networkIssue.clear();
+                requestMetadataPeers(true);
+            }
+            continue;
+        }
+        if (lt::alert_cast<lt::dht_bootstrap_alert>(alert)) {
+            if (publicDiscovery)
+                requestMetadataPeers(true);
+            continue;
+        }
+        if (const auto* listenError = lt::alert_cast<lt::listen_failed_alert>(alert)) {
+            networkIssue = QStringLiteral("无法建立监听：") + fromUtf8(listenError->error.message());
+            continue;
+        }
+        if (const auto* dhtError = lt::alert_cast<lt::dht_error_alert>(alert)) {
+            networkIssue = QStringLiteral("节点发现失败：") + fromUtf8(dhtError->error.message());
+            continue;
+        }
         const auto* torrentAlert = dynamic_cast<const lt::torrent_alert*>(alert);
         if (!torrentAlert)
             continue;
@@ -750,14 +861,20 @@ void TorrentService::State::poll()
     bool changed = false;
     bool activeTask = false;
     for (const auto& task : tasks) {
-        activeTask = activeTask || active(*task);
+        activeTask = activeTask || (active(*task) && task->publicTask);
         if (!task->handle.is_valid() || !active(*task) || task->finishing)
             continue;
         try {
             const auto status = task->handle.status();
+            task->knownPeers = status.list_peers;
+            task->connectedPeers = status.num_peers;
             if (task->status == QStringLiteral("resolving") && status.has_metadata) {
                 receiveMetadata(task);
                 continue;
+            }
+            if (task->status == QStringLiteral("resolving")) {
+                task->metadataElapsedSeconds = task->metadataClock.isValid() ? task->metadataClock.elapsed() / 1000 : 0;
+                changed = true;
             }
             if (!task->confirmed)
                 continue;
@@ -779,6 +896,11 @@ void TorrentService::State::poll()
         settings.set_bool(lt::settings_pack::enable_dht, false);
         session->apply_settings(settings);
         publicDiscovery = false;
+        dhtNodes.clear();
+    } else if (publicDiscovery && discoveryClock.elapsed() - lastDhtStats >= 1000) {
+        session->post_dht_stats();
+        lastDhtStats = discoveryClock.elapsed();
+        requestMetadataPeers();
     }
     if (changed) {
         if (checkpoint.elapsed() >= 3000)
