@@ -60,7 +60,10 @@ private:
         QString createdAt;          ///< 创建时间，使用 ISO 8601 格式。
         QByteArray etag;            ///< 可用于 If-Range 的强实体标识。
         QByteArray lastModified;    ///< 无强实体标识时使用的修改时间。
+        QPointer<QNetworkAccessManager> network; ///< 当前传输独立的连接池，恢复时不会复用已失效连接。
         QPointer<QNetworkReply> reply; ///< 当前请求，过期回调不会影响新请求。
+        QPointer<QTimer> retryTimer; ///< 暂态网络故障后的等待计时器，暂停和取消时清理。
+        int retryAttempts = 0;      ///< 本轮人工启动以来的自动重试次数，收到数据也不重置。
         std::unique_ptr<QFile> file; ///< 仅属于本任务的部分文件句柄。
         QElapsedTimer elapsed;      ///< 当前速度采样区间的计时器。
         qint64 speedStartBytes = 0; ///< 速度采样开始时的已写入字节数。
@@ -105,6 +108,8 @@ private:
     void consume(const TaskPtr& task);
     /** 请求完成时处理重定向、失败或原子发布最终文件。 */
     void finish(const TaskPtr& task);
+    /** 为暂态网络故障安排有限次数的续传，等待期间仍允许暂停和取消。 */
+    bool scheduleRetry(const TaskPtr& task);
     /** 停止当前请求、关闭文件，不删除部分内容。 */
     void stop(const TaskPtr& task);
     /** 标记失败并保留可以人工重试的部分文件。 */
@@ -117,7 +122,6 @@ private:
     QString m_loadError;           ///< 损坏或不安全索引的保护性错误。
     QHash<QString, TaskPtr> m_tasks; ///< 按标识检索的任务集合。
     QStringList m_order;           ///< 任务卡片的创建顺序。
-    QNetworkAccessManager* m_network; ///< 本服务独立持有的网络管理器。
     QTimer* m_notifyTimer;         ///< 高频进度通知的合并计时器。
     QTimer* m_checkpointTimer;     ///< 下载中索引检查点的合并计时器。
 };

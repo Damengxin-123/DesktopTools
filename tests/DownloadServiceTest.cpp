@@ -1,6 +1,7 @@
 #include "services/DownloadService.h"
 
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -57,9 +58,9 @@ public:
         QByteArray ifRange; ///< 客户端发送的 If-Range。
     };
 
-    /** 启动仅监听本机回环地址的模拟服务器。 */
-    DownloadHttpFixture()
-        : m_server(this), m_payload(256 * 1024, '\0')
+    /** 启动本机服务器，可配置负载大小、分块大小及发送间隔，默认保留慢流行为。 */
+    explicit DownloadHttpFixture(qsizetype payloadBytes = 256 * 1024, qsizetype chunkBytes = 4096, int sendIntervalMs = 10)
+        : m_server(this), m_payload(payloadBytes, '\0'), m_chunkBytes(chunkBytes), m_sendIntervalMs(sendIntervalMs)
     {
         for (qsizetype index = 0; index < m_payload.size(); ++index)
             m_payload[index] = static_cast<char>(index % 251);
@@ -93,6 +94,8 @@ public:
     QByteArray payload() const { return m_payload; }
     /** 返回已经收到的请求列表。 */
     QList<Request> requests() const { return m_requests; }
+    /** 返回指定接口的请求次数，用于验证重试上限和等待期间没有新请求。 */
+    int requestCount(const QByteArray& path) const { return m_requestCounts.value(path); }
 
 private:
     /** 根据请求路径返回成功、续传、重定向或异常响应。 */
@@ -108,6 +111,10 @@ private:
                 request.ifRange = line.mid(9).trimmed();
         }
         m_requests.append(request);
+        const int attempt = ++m_requestCounts[request.path];
+        // 首次请求保持连接但不发送任何响应，实际触发客户端的网络超时。
+        if (request.path == "/timeout-once.bin" && attempt == 1)
+            return;
         if (request.path == "/redirect.bin" || request.path == "/unsafe-redirect.bin") {
             const QByteArray location = request.path == "/redirect.bin" ? "/range.bin" : "file:///outside.bin";
             socket->write("HTTP/1.1 302 Found\r\nLocation: " + location + "\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
@@ -145,7 +152,9 @@ private:
             response += "Content-Encoding: gzip\r\n";
         response += "Content-Type: application/octet-stream\r\nConnection: close\r\n\r\n";
         socket->write(response);
-        if (request.path == "/cut.bin") {
+        const bool cutFirstAttempt = attempt == 1 && (request.path == "/retry-once.bin"
+            || request.path == "/pause-retry.bin" || request.path == "/cancel-retry.bin");
+        if (request.path == "/cut.bin" || cutFirstAttempt) {
             socket->write(body.left(1024));
             socket->disconnectFromHost();
             return;
@@ -156,15 +165,23 @@ private:
         }
         auto sent = std::make_shared<qint64>(0);
         auto* timer = new QTimer(socket);
-        timer->setInterval(10);
-        connect(timer, &QTimer::timeout, socket, [socket, timer, sent, body] {
+        timer->setInterval(m_sendIntervalMs);
+        connect(timer, &QTimer::timeout, socket, [socket, timer, sent, body, chunkBytes = m_chunkBytes] {
             if (socket->state() != QAbstractSocket::ConnectedState) {
                 timer->stop();
                 return;
             }
-            const QByteArray chunk = body.mid(*sent, 4096);
-            socket->write(chunk);
-            *sent += chunk.size();
+            // 等待发送队列排空，避免快速流把整个测试文件一次性积压在内存中。
+            if (socket->bytesToWrite() >= chunkBytes * 2)
+                return;
+            const QByteArray chunk = body.mid(*sent, chunkBytes);
+            const qint64 written = socket->write(chunk);
+            if (written <= 0) {
+                timer->stop();
+                socket->abort();
+                return;
+            }
+            *sent += written;
             if (*sent >= body.size()) {
                 timer->stop();
                 socket->disconnectFromHost();
@@ -175,9 +192,12 @@ private:
 
     QTcpServer m_server;                  ///< 仅供本测试使用的本机服务器。
     QByteArray m_payload;                 ///< 各正常接口共同返回的确定性文件。
+    qsizetype m_chunkBytes;               ///< 每次定时发送的数据块大小。
+    int m_sendIntervalMs;                 ///< 数据块发送间隔，零表示尽快发送并受队列上限约束。
     bool m_listening = false;             ///< 本机监听是否成功。
     QHash<QTcpSocket*, QByteArray> m_buffers; ///< 尚未收齐请求头的连接缓存。
     QList<Request> m_requests;            ///< 用于断言 Range 行为的请求历史。
+    QHash<QByteArray, int> m_requestCounts; ///< 各接口收到的请求次数，控制首次失败的模拟响应。
 };
 }
 
@@ -188,6 +208,16 @@ class DownloadServiceTest final : public QObject
 private slots:
     /** 多个任务可以同时运行，完成文件不会覆盖已存在的同名文件。 */
     void downloadsConcurrentlyWithoutOverwriting();
+    /** 大文件快速流反复填满和排空网络缓冲区，仍能完整写入并清理部分文件。 */
+    void downloadsLargeFastStreamCompletely();
+    /** 首次连接中断后自动发送已校验的断点请求，最终文件保持完整。 */
+    void retriesInterruptedTransferWithValidatedRange();
+    /** 重试等待期间暂停或取消不会再发请求，暂停任务仍可手动继续。 */
+    void stopsPendingRetryWhenPausedOrCancelled();
+    /** 暂停后立即继续时，旧重试定时器到期也不能干扰新的网络请求。 */
+    void ignoresOldRetryDeadlineAfterImmediateResume();
+    /** 首次请求持续无响应超过真实网络超时后，自动重试能够完成下载。 */
+    void retriesAfterRealNetworkTimeout();
     /** 暂停后保留内容，继续时发送 Range 与 If-Range 并正确拼接。 */
     void pausesAndResumesWithValidatedRange();
     /** 不支持断点或缺少校验标识时安全从头下载。 */
@@ -241,6 +271,129 @@ void DownloadServiceTest::downloadsConcurrentlyWithoutOverwriting()
     QCOMPARE(firstTask.value(QStringLiteral("totalBytes")).toLongLong(), qint64(server.payload().size()));
     QVERIFY(!service.hasActiveTasks());
     QVERIFY(changes.count() > 2);
+    QVERIFY(QDir(root.path()).entryList({QStringLiteral("*.part")}, QDir::Files | QDir::Hidden).isEmpty());
+}
+
+void DownloadServiceTest::downloadsLargeFastStreamCompletely()
+{
+    QTemporaryDir root;
+    DownloadHttpFixture server(32 * 1024 * 1024, 512 * 1024, 0);
+    QVERIFY(root.isValid() && server.listening());
+    DownloadService service(root.filePath(QStringLiteral("data")));
+    const auto created = service.createTask(server.url(QStringLiteral("large-fast.bin")), root.path(), root.path());
+    QVERIFY2(ok(created), qPrintable(created.value(QStringLiteral("error")).toString()));
+    const QString id = data(created).value(QStringLiteral("id")).toString();
+    QVERIFY(!id.isEmpty());
+    QTRY_COMPARE_WITH_TIMEOUT(task(service, id).value(QStringLiteral("status")).toString(), QStringLiteral("completed"), 20000);
+    const auto completed = task(service, id);
+    const QString filePath = completed.value(QStringLiteral("filePath")).toString();
+    QCOMPARE(QFileInfo(filePath).size(), qint64(server.payload().size()));
+    QCOMPARE(completed.value(QStringLiteral("bytesReceived")).toLongLong(), qint64(server.payload().size()));
+    QCOMPARE(completed.value(QStringLiteral("totalBytes")).toLongLong(), qint64(server.payload().size()));
+    QCOMPARE(readFile(filePath), server.payload());
+    QVERIFY(!service.hasActiveTasks());
+    QVERIFY(QDir(root.path()).entryList({QStringLiteral("*.part")}, QDir::Files | QDir::Hidden).isEmpty());
+}
+
+void DownloadServiceTest::retriesInterruptedTransferWithValidatedRange()
+{
+    QTemporaryDir root;
+    DownloadHttpFixture server;
+    QVERIFY(root.isValid() && server.listening());
+    DownloadService service(root.filePath(QStringLiteral("data")));
+    const auto created = service.createTask(server.url(QStringLiteral("retry-once.bin")), root.path(), root.path());
+    QVERIFY(ok(created));
+    const QString id = data(created).value(QStringLiteral("id")).toString();
+    QTRY_VERIFY_WITH_TIMEOUT(task(service, id).value(QStringLiteral("warning")).toString().contains(QStringLiteral("重试")), 5000);
+    QCOMPARE(task(service, id).value(QStringLiteral("status")).toString(), QStringLiteral("downloading"));
+    QCOMPARE(task(service, id).value(QStringLiteral("bytesReceived")).toLongLong(), qint64(1024));
+    QCOMPARE(server.requestCount("/retry-once.bin"), 1);
+    QVERIFY(service.hasActiveTasks());
+    QTRY_COMPARE_WITH_TIMEOUT(task(service, id).value(QStringLiteral("status")).toString(), QStringLiteral("completed"), 10000);
+    QCOMPARE(server.requestCount("/retry-once.bin"), 2);
+    QCOMPARE(server.requests().last().range, QByteArray("bytes=1024-"));
+    QCOMPARE(server.requests().last().ifRange, QByteArray("\"test-v1\""));
+    const auto completed = task(service, id);
+    QCOMPARE(completed.value(QStringLiteral("bytesReceived")).toLongLong(), qint64(server.payload().size()));
+    QCOMPARE(readFile(completed.value(QStringLiteral("filePath")).toString()), server.payload());
+    QVERIFY(QDir(root.path()).entryList({QStringLiteral("*.part")}, QDir::Files | QDir::Hidden).isEmpty());
+}
+
+void DownloadServiceTest::stopsPendingRetryWhenPausedOrCancelled()
+{
+    QTemporaryDir root;
+    DownloadHttpFixture server;
+    QVERIFY(root.isValid() && server.listening());
+    DownloadService service(root.filePath(QStringLiteral("data")));
+    const auto paused = service.createTask(server.url(QStringLiteral("pause-retry.bin")), root.path(), root.path());
+    QVERIFY(ok(paused));
+    const QString pausedId = data(paused).value(QStringLiteral("id")).toString();
+    QTRY_VERIFY_WITH_TIMEOUT(task(service, pausedId).value(QStringLiteral("warning")).toString().contains(QStringLiteral("重试")), 5000);
+    QVERIFY(ok(service.pauseTask(pausedId)));
+    const auto cancelled = service.createTask(server.url(QStringLiteral("cancel-retry.bin")), root.path(), root.path());
+    QVERIFY(ok(cancelled));
+    const QString cancelledId = data(cancelled).value(QStringLiteral("id")).toString();
+    QTRY_VERIFY_WITH_TIMEOUT(task(service, cancelledId).value(QStringLiteral("warning")).toString().contains(QStringLiteral("重试")), 5000);
+    QVERIFY(ok(service.cancelTask(cancelledId)));
+
+    QTest::qWait(1500);
+    QCOMPARE(server.requestCount("/pause-retry.bin"), 1);
+    QCOMPARE(server.requestCount("/cancel-retry.bin"), 1);
+    QCOMPARE(task(service, pausedId).value(QStringLiteral("status")).toString(), QStringLiteral("paused"));
+    QCOMPARE(task(service, cancelledId).value(QStringLiteral("status")).toString(), QStringLiteral("cancelled"));
+    QVERIFY(!service.hasActiveTasks());
+    QVERIFY(!QFileInfo::exists(root.filePath(QStringLiteral(".desktoptool-") + cancelledId + QStringLiteral(".part"))));
+
+    QVERIFY(ok(service.resumeTask(pausedId)));
+    QTRY_COMPARE_WITH_TIMEOUT(task(service, pausedId).value(QStringLiteral("status")).toString(), QStringLiteral("completed"), 10000);
+    QCOMPARE(server.requestCount("/pause-retry.bin"), 2);
+    QCOMPARE(server.requestCount("/cancel-retry.bin"), 1);
+    QCOMPARE(server.requests().last().range, QByteArray("bytes=1024-"));
+    QCOMPARE(server.requests().last().ifRange, QByteArray("\"test-v1\""));
+    QCOMPARE(readFile(task(service, pausedId).value(QStringLiteral("filePath")).toString()), server.payload());
+}
+
+void DownloadServiceTest::ignoresOldRetryDeadlineAfterImmediateResume()
+{
+    QTemporaryDir root;
+    DownloadHttpFixture server(512 * 1024, 4096, 20);
+    QVERIFY(root.isValid() && server.listening());
+    DownloadService service(root.filePath(QStringLiteral("data")));
+    const auto created = service.createTask(server.url(QStringLiteral("retry-once.bin")), root.path(), root.path());
+    QVERIFY(ok(created));
+    const QString id = data(created).value(QStringLiteral("id")).toString();
+    QTRY_VERIFY_WITH_TIMEOUT(task(service, id).value(QStringLiteral("warning")).toString().contains(QStringLiteral("重试")), 5000);
+    QVERIFY(ok(service.pauseTask(id)));
+    QVERIFY(ok(service.resumeTask(id)));
+    QTRY_COMPARE_WITH_TIMEOUT(server.requestCount("/retry-once.bin"), 2, 5000);
+    // 正常响应持续两秒以上，旧的一秒重试期限会落在新请求传输过程中。
+    QTest::qWait(1500);
+    QCOMPARE(server.requestCount("/retry-once.bin"), 2);
+    QVERIFY(task(service, id).value(QStringLiteral("status")).toString() != QStringLiteral("failed"));
+    QTRY_COMPARE_WITH_TIMEOUT(task(service, id).value(QStringLiteral("status")).toString(), QStringLiteral("completed"), 10000);
+    QCOMPARE(server.requestCount("/retry-once.bin"), 2);
+    QCOMPARE(server.requests().last().range, QByteArray("bytes=1024-"));
+    QCOMPARE(readFile(task(service, id).value(QStringLiteral("filePath")).toString()), server.payload());
+}
+
+void DownloadServiceTest::retriesAfterRealNetworkTimeout()
+{
+    QTemporaryDir root;
+    DownloadHttpFixture server;
+    QVERIFY(root.isValid() && server.listening());
+    DownloadService service(root.filePath(QStringLiteral("data")));
+    QElapsedTimer elapsed;
+    elapsed.start();
+    const auto created = service.createTask(server.url(QStringLiteral("timeout-once.bin")), root.path(), root.path());
+    QVERIFY(ok(created));
+    const QString id = data(created).value(QStringLiteral("id")).toString();
+    QTRY_COMPARE_WITH_TIMEOUT(task(service, id).value(QStringLiteral("status")).toString(), QStringLiteral("completed"), 45000);
+    // 给系统定时器少量误差空间，确认这里经过了真实的约三十秒超时。
+    QVERIFY(elapsed.elapsed() >= 28000);
+    QCOMPARE(server.requestCount("/timeout-once.bin"), 2);
+    QVERIFY(server.requests().last().range.isEmpty());
+    QCOMPARE(readFile(task(service, id).value(QStringLiteral("filePath")).toString()), server.payload());
+    QVERIFY(!service.hasActiveTasks());
     QVERIFY(QDir(root.path()).entryList({QStringLiteral("*.part")}, QDir::Files | QDir::Hidden).isEmpty());
 }
 
@@ -334,9 +487,17 @@ void DownloadServiceTest::rejectsInvalidResponsesAndInterruptedTransfers()
     DownloadService service(root.filePath(QStringLiteral("data")));
     for (const QString& path : {QStringLiteral("error.bin"), QStringLiteral("cut.bin"), QStringLiteral("unsafe-redirect.bin"), QStringLiteral("encoded.bin")}) {
         const QString id = data(service.createTask(server.url(path), root.path(), root.path())).value(QStringLiteral("id")).toString();
-        QTRY_COMPARE_WITH_TIMEOUT(task(service, id).value(QStringLiteral("status")).toString(), QStringLiteral("failed"), 10000);
+        QTRY_COMPARE_WITH_TIMEOUT(task(service, id).value(QStringLiteral("status")).toString(), QStringLiteral("failed"), 15000);
         QVERIFY(!task(service, id).value(QStringLiteral("error")).toString().isEmpty());
         QVERIFY(!QFileInfo::exists(task(service, id).value(QStringLiteral("filePath")).toString()));
+        if (path == QStringLiteral("cut.bin")) {
+            QCOMPARE(server.requestCount("/cut.bin"), 4);
+            const QString partial = root.filePath(QStringLiteral(".desktoptool-") + id + QStringLiteral(".part"));
+            QCOMPARE(readFile(partial), server.payload().left(4 * 1024));
+            QVERIFY(!service.hasActiveTasks());
+        } else {
+            QCOMPARE(server.requestCount(QByteArray("/") + path.toLatin1()), 1);
+        }
     }
     for (const QString& path : {QStringLiteral("bad-range.bin"), QStringLiteral("changed-validator.bin"), QStringLiteral("unknown-range.bin")}) {
         const QString id = data(service.createTask(server.url(path), root.path(), root.path())).value(QStringLiteral("id")).toString();
@@ -462,8 +623,8 @@ void DownloadServiceTest::preservesPartialWhenIndexCannotBeSaved()
     const QString pausedId = data(service.createTask(server.url(QStringLiteral("range.bin")), root.path(), root.path())).value(QStringLiteral("id")).toString();
     const QString failedId = data(service.createTask(server.url(QStringLiteral("cut.bin")), root.path(), root.path())).value(QStringLiteral("id")).toString();
     QTRY_VERIFY_WITH_TIMEOUT(task(service, pausedId).value(QStringLiteral("bytesReceived")).toLongLong() >= 4096, 5000);
-    QTRY_COMPARE_WITH_TIMEOUT(task(service, failedId).value(QStringLiteral("status")).toString(), QStringLiteral("failed"), 5000);
     QVERIFY(ok(service.pauseTask(pausedId)));
+    QTRY_COMPARE_WITH_TIMEOUT(task(service, failedId).value(QStringLiteral("status")).toString(), QStringLiteral("failed"), 15000);
     const QString pausedPart = root.filePath(QStringLiteral(".desktoptool-") + pausedId + QStringLiteral(".part"));
     const QString failedPart = root.filePath(QStringLiteral(".desktoptool-") + failedId + QStringLiteral(".part"));
     const QByteArray pausedBefore = readFile(pausedPart);

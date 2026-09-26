@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(DesktopTool VERSION 2.1.0 LANGUAGES CXX)
+project(DesktopTool VERSION 2.1.1 LANGUAGES CXX)
 
 # Qt 安装位置由 CMAKE_PREFIX_PATH、Qt6_DIR 或用户本地预设提供。
 set(CMAKE_CXX_STANDARD 17)
@@ -53,7 +53,7 @@ if(BUILD_TESTING)
     add_executable(DownloadServiceTest tests/DownloadServiceTest.cpp)
     target_link_libraries(DownloadServiceTest PRIVATE DesktopToolCore Qt6::Test)
     add_test(NAME download-service COMMAND DownloadServiceTest)
-    set_tests_properties(download-service PROPERTIES TIMEOUT 90)
+    set_tests_properties(download-service PROPERTIES TIMEOUT 120)
     add_executable(WebSmokeTest tests/WebSmokeTest.cpp resources/app.qrc tests/test-resources.qrc)
     target_link_libraries(WebSmokeTest PRIVATE DesktopToolCore Qt6::Test)
     add_test(NAME web-integration COMMAND WebSmokeTest)
