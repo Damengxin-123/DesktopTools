@@ -25,7 +25,7 @@ HTML 页面 → web/bridge.js → QWebChannel → AppBridge → Qt 业务服务 
 | `web/` | HTML、CSS、JavaScript 页面与异步桥接封装 |
 | `resources/` | 应用图标、Windows 资源及将网页编译进应用的 Qt 资源清单 |
 | `tests/` | 服务回归测试和真实 WebEngine / WebChannel 集成测试 |
-| `pack/` | 安装到本机目录或生成便携发布目录的包装脚本 |
+| `pack/` | 本机更新、生成不含用户数据的便携 ZIP 压缩包 |
 
 仓库以新版 `src/` 和 `web/` 为活动代码，不再包含旧版 `code/`、编译缓存或预先打包的 Qt 运行库。旧版源码可从 Git 历史查看；用户数据格式的兼容与迁移继续由新版服务提供。
 
@@ -105,22 +105,32 @@ pack\copy_lib.bat
 
 该脚本使用 `cmake --install out/build/web-x64-release --prefix out/bin` 更新原有本机程序目录，保留原来 `out/bin/data`。之后从 `out/bin/DesktopTool.exe` 启动即可继续使用原数据。
 
-生成便携发布目录：
+生成不含用户数据的便携 ZIP：
 
 ```bat
 pack\pack_app.bat
 ```
 
-该脚本使用相同的 CMake 安装流程部署到 `pack/app`。Qt 官方部署脚本会部署应用依赖、WebEngine 子进程、资源和语言包，分发时应包含整个目录。两个包装脚本均检查错误码，且不移动、删除或自动复制用户数据。如果发布目标目录已有历史数据，发布前自行确认是否适合分发。
+脚本调用 Windows 自带的 PowerShell 5.1，每次将当前 Release 构建通过 CMake 安装到全新的临时目录，再生成压缩包。默认输出为 `out/packages/DesktopTool-版本号-windows-x64-时间戳.zip`，同时生成同名 `.zip.sha256` 校验文件。解压后进入 `DesktopTool-版本号-windows-x64` 文件夹运行 `DesktopTool.exe`。
 
-磁力引擎及其依赖的分发许可证保存在 `third_party/licenses`，安装时复制到应用的 `licenses` 目录，发布时应一并保留。
+压缩包包含主程序、Qt 运行库和插件、WebEngine 子进程及资源、语言包、配置和第三方许可证；HTML/CSS/JavaScript 与应用图标已经编译进程序。Qt 部署流程附带 `vc_redist.x64.exe` 时一并保留，目标电脑缺少 MSVC 运行库时可先安装它。使用动态 OpenSSL 的构建仍须配置 `DESKTOPTOOL_EXTRA_RUNTIME_FILES`，确保两个 DLL 随安装部署。
 
-脚本使用 `PATH` 中的 `cmake.exe`；也可通过 `DESKTOPTOOL_CMAKE` 环境变量指定 CMake 可执行文件。变量值只填写路径，不附加命令参数。例如：
+打包不会读取或复制 `out/bin`、`pack/app` 或任意用户下载目录，因此不会带入便签、快捷方式、设置、下载记录、磁力缓存及已下载文件，也不会修改本地用户数据。脚本检查关键发布资源是否齐全，拒绝部署树中的用户数据目录、日志、调试文件和链接；失败返回非零退出码，已有 ZIP 保持不变。正常完成后自动清理本次临时目录。
+
+可以指定构建目录和输出目录，路径含空格时加双引号：
+
+```bat
+pack\pack_app.bat -BuildDirectory "D:\DesktopTool\out\build\web-x64-release" -OutputDirectory "D:\Release Packages"
+```
+
+也可直接运行 `pack/package_release.ps1`，支持相同参数。打包脚本优先使用 `-CMakePath` 或 `DESKTOPTOOL_CMAKE` 指定的程序，未指定时使用构建缓存记录的 CMake，再回退到 `PATH`。本机更新脚本 `copy_lib.bat` 使用 `DESKTOPTOOL_CMAKE` 或 `PATH`。例如：
 
 ```bat
 set "DESKTOPTOOL_CMAKE=C:\Program Files\CMake\bin\cmake.exe"
 pack\pack_app.bat
 ```
+
+磁力引擎及其依赖的完整许可证位于 `third_party/licenses`，会随包放入 `licenses` 目录。打包产物位于 Git 已忽略的 `out` 目录，不提交到源代码仓库。
 
 ## 数据与迁移
 
