@@ -4,7 +4,7 @@
 #include <QObject>
 #include <QVariantMap>
 
-// 管理全局字体和热键配置，并兼容原有设置文件。
+// 管理全局字体、热键和下载目录配置，并兼容原有设置文件。
 class SettingsService final : public QObject
 {
     Q_OBJECT
@@ -14,7 +14,7 @@ public:
     explicit SettingsService(const QString& dataRoot, QObject* parent = nullptr);
     // 获取网页使用的设置字段。
     QVariantMap snapshot() const;
-    // 校验完整设置并返回规范化字段，供热键注册事务提前检查。
+    // 校验完整设置并探测下载目录可写性，兼容未传下载目录的旧调用方。
     static QVariantMap validate(const QVariantMap& settings);
     // 校验并原子保存设置，同时保留文件内未识别的字段。
     QVariantMap save(const QVariantMap& settings);
@@ -24,6 +24,8 @@ signals:
     void changed();
 
 private:
+    // 加载时仅检查值格式，保存时进一步检查目录存在性与写入权限。
+    static QVariantMap validateValues(const QVariantMap& settings, bool checkDirectory);
     // 把保留旧版键名的配置转换为网页设置字段。
     QVariantMap data() const;
 

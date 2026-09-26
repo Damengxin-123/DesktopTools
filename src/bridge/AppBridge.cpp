@@ -1,6 +1,7 @@
 #include "AppBridge.h"
 
 #include "app/GlobalHotkey.h"
+#include "services/DownloadService.h"
 #include "services/NoteService.h"
 #include "services/ServiceResult.h"
 #include "services/SettingsService.h"
@@ -11,6 +12,7 @@
 #include <QDir>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QJsonValue>
 #include <QUrl>
 #include <QWidget>
 
@@ -19,11 +21,13 @@ AppBridge::AppBridge(const QString& dataRoot, QWidget* window, bool nativeIntegr
       m_shortcuts(new ShortcutService(m_dataRoot, this)),
       m_notes(new NoteService(m_dataRoot, this)),
       m_settings(new SettingsService(m_dataRoot, this)),
+      m_downloads(new DownloadService(m_dataRoot, this)),
       m_hotkey(new GlobalHotkey(nativeIntegration, this))
 {
     connect(m_shortcuts, &ShortcutService::changed, this, &AppBridge::shortcutsChanged);
     connect(m_notes, &NoteService::changed, this, &AppBridge::notesChanged);
     connect(m_settings, &SettingsService::changed, this, &AppBridge::settingsChanged);
+    connect(m_downloads, &DownloadService::changed, this, &AppBridge::downloadsChanged);
     connect(m_hotkey, &GlobalHotkey::activated, this, &AppBridge::activateWindowRequested);
     const auto result = m_settings->snapshot();
     if (result.value("ok").toBool()) {
@@ -72,6 +76,40 @@ QVariantMap AppBridge::moveNote(const QString& id, const QString& categoryId, co
 QVariantMap AppBridge::saveNoteCategory(const QString& id, const QString& name)
 { return m_notes->saveCategory(id, name); }
 QVariantMap AppBridge::deleteNoteCategory(const QString& id) { return m_notes->removeCategory(id); }
+
+QVariantMap AppBridge::getDownloads() const { return m_downloads->snapshot(); }
+
+QVariantMap AppBridge::createDownload(const QVariantMap& task)
+{
+    if (!QJsonValue::fromVariant(task.value(QStringLiteral("url"))).isString())
+        return ServiceResult::failure(QStringLiteral("请填写有效的下载网址。"));
+    if (task.contains(QStringLiteral("directory"))
+        && !QJsonValue::fromVariant(task.value(QStringLiteral("directory"))).isString())
+        return ServiceResult::failure(QStringLiteral("下载目录必须是文件夹路径。"));
+    const auto settings = m_settings->snapshot();
+    if (!settings.value(QStringLiteral("ok")).toBool())
+        return settings;
+    return m_downloads->createTask(task.value(QStringLiteral("url")).toString(),
+        task.value(QStringLiteral("directory")).toString(),
+        settings.value(QStringLiteral("data")).toMap().value(QStringLiteral("downloadDirectory")).toString());
+}
+
+QVariantMap AppBridge::pauseDownload(const QString& id) { return m_downloads->pauseTask(id); }
+QVariantMap AppBridge::resumeDownload(const QString& id) { return m_downloads->resumeTask(id); }
+QVariantMap AppBridge::cancelDownload(const QString& id) { return m_downloads->cancelTask(id); }
+QVariantMap AppBridge::removeDownload(const QString& id) { return m_downloads->removeTask(id); }
+QVariantMap AppBridge::openDownloadDirectory(const QString& id) { return m_downloads->openDirectory(id); }
+bool AppBridge::hasActiveDownloads() const { return m_downloads->hasActiveTasks(); }
+
+QVariantMap AppBridge::chooseDownloadDirectory()
+{
+    const QString initial = m_settings->snapshot().value(QStringLiteral("data")).toMap()
+                                .value(QStringLiteral("downloadDirectory")).toString();
+    const QString directory = QFileDialog::getExistingDirectory(m_window, QStringLiteral("选择下载目录"), initial);
+    return ServiceResult::success(QVariantMap{{QStringLiteral("directory"), directory},
+        {QStringLiteral("cancelled"), directory.isEmpty()}});
+}
+
 QVariantMap AppBridge::getSettings() const { return m_settings->snapshot(); }
 
 QVariantMap AppBridge::saveSettings(const QVariantMap& settings)
@@ -79,7 +117,11 @@ QVariantMap AppBridge::saveSettings(const QVariantMap& settings)
     const auto current = m_settings->snapshot();
     if (!current.value("ok").toBool())
         return current;
-    const auto validated = SettingsService::validate(settings);
+    // 与快照合并，兼容未传下载目录的旧调用方以及只修改单个设置。
+    auto candidate = current.value(QStringLiteral("data")).toMap();
+    for (auto iterator = settings.cbegin(); iterator != settings.cend(); ++iterator)
+        candidate.insert(iterator.key(), iterator.value());
+    const auto validated = SettingsService::validate(candidate);
     if (!validated.value("ok").toBool())
         return validated;
     const auto next = validated.value("data").toMap();
@@ -98,7 +140,8 @@ QVariantMap AppBridge::saveSettings(const QVariantMap& settings)
 
 QVariantMap AppBridge::resetSettings()
 {
-    return saveSettings({{"fontSize", 16}, {"hotkeyModifier", 0}, {"hotkeyKey", 0x77}});
+    return saveSettings({{"fontSize", 16}, {"hotkeyModifier", 0}, {"hotkeyKey", 0x77},
+        {"downloadDirectory", QString()}});
 }
 
 QVariantMap AppBridge::openDataDirectory()

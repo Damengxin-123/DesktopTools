@@ -5,6 +5,7 @@
 #include <QStringList>
 
 class GlobalHotkey;
+class DownloadService;
 class NoteService;
 class SettingsService;
 class ShortcutService;
@@ -49,11 +50,29 @@ public:
     Q_INVOKABLE QVariantMap saveNoteCategory(const QString& id, const QString& name);
     // 删除便签分类并保留其中的便签。
     Q_INVOKABLE QVariantMap deleteNoteCategory(const QString& id);
+    // 返回下载任务和历史记录。
+    Q_INVOKABLE QVariantMap getDownloads() const;
+    // 使用网址和可选目录创建下载任务。
+    Q_INVOKABLE QVariantMap createDownload(const QVariantMap& task);
+    // 暂停指定任务并保留已下载内容。
+    Q_INVOKABLE QVariantMap pauseDownload(const QString& id);
+    // 继续已暂停或失败的下载任务。
+    Q_INVOKABLE QVariantMap resumeDownload(const QString& id);
+    // 取消指定下载任务。
+    Q_INVOKABLE QVariantMap cancelDownload(const QString& id);
+    // 移除指定下载任务的历史记录。
+    Q_INVOKABLE QVariantMap removeDownload(const QString& id);
+    // 通过资源管理器打开任务的下载目录。
+    Q_INVOKABLE QVariantMap openDownloadDirectory(const QString& id);
+    // 选择现有下载目录，返回目录和是否取消的标志。
+    Q_INVOKABLE QVariantMap chooseDownloadDirectory();
+    // 查询是否有下载正在进行，供原生退出确认使用。
+    bool hasActiveDownloads() const;
     // 读取统一设置。
     Q_INVOKABLE QVariantMap getSettings() const;
     // 校验、切换系统热键并持久化设置，失败时恢复旧组合。
     Q_INVOKABLE QVariantMap saveSettings(const QVariantMap& settings);
-    // 恢复默认字号和 F8 热键。
+    // 恢复默认字号、F8 热键和系统下载目录。
     Q_INVOKABLE QVariantMap resetSettings();
     // 使用资源管理器打开数据目录。
     Q_INVOKABLE QVariantMap openDataDirectory();
@@ -66,6 +85,8 @@ signals:
     void notesChanged();
     // 设置已持久化。
     void settingsChanged();
+    // 下载任务状态、进度或历史记录发生变化。
+    void downloadsChanged();
     // 热键请求唤醒主窗口。
     void activateWindowRequested();
 private:
@@ -79,6 +100,8 @@ private:
     NoteService* m_notes;
     // 设置服务，由本对象管理生命周期。
     SettingsService* m_settings;
+    // 下载任务服务，由本对象管理生命周期。
+    DownloadService* m_downloads;
     // 全局热键注册器。
     GlobalHotkey* m_hotkey;
     // 启动时热键注册失败的说明。
