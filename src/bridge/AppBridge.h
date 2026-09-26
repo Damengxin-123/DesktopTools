@@ -54,6 +54,10 @@ public:
     Q_INVOKABLE QVariantMap getDownloads() const;
     // 使用网址和可选目录创建下载任务。
     Q_INVOKABLE QVariantMap createDownload(const QVariantMap& task);
+    // 获取磁力任务的文件清单，供网页显示勾选窗口。
+    Q_INVOKABLE QVariantMap getDownloadFiles(const QString& id) const;
+    // 确认磁力任务的文件索引，校验通过后才开始下载内容。
+    Q_INVOKABLE QVariantMap confirmDownloadFiles(const QString& id, const QVariantList& indices);
     // 暂停指定任务并保留已下载内容。
     Q_INVOKABLE QVariantMap pauseDownload(const QString& id);
     // 继续已暂停或失败的下载任务。

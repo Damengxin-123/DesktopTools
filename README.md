@@ -6,7 +6,7 @@
 
 - **快捷方式**：目录、网址、文件的分类管理、搜索、编辑、批量删除与排序，由 Qt 调用系统打开目标。
 - **便签**：分类管理、富文本编辑与图片保存；Qt 负责内容过滤、文件访问及数据保存。
-- **下载**：通过 HTTP/HTTPS 网址创建下载任务，查看进度、速度和历史记录，支持暂停、继续、取消及打开所在目录。
+- **下载**：支持 HTTP/HTTPS 和磁力链接，查看进度、速度和历史记录；磁力任务获取文件清单后，由用户勾选并确认才下载内容，支持暂停、继续、取消及打开所在目录。
 - **设置**：字号、全局热键、默认下载目录和恢复默认设置。热键注册及设置写入一起成功后生效。
 - **系统集成**：托盘、默认 F8 唤醒、单实例唤醒及兼容旧版本的实例标识。有托盘时关闭窗口会隐藏，真正退出使用托盘菜单。
 
@@ -35,22 +35,27 @@ HTML 页面 → web/bridge.js → QWebChannel → AppBridge → Qt 业务服务 
 
 在下载页填写 HTTP/HTTPS 文件网址即可创建任务，也可为单次下载选择目录。设置中的默认下载目录初始为系统“下载”文件夹，清空后保存可恢复系统默认位置；自定义默认目录须已存在且可写。
 
+输入 `magnet:?` 链接时自动进入磁力流程：先解析链接并连接节点获取文件清单，随后弹出文件选择窗口，支持全选、全不选及查看选中大小。至少勾选一个文件后点击“开始下载”，才传输文件内容。关闭弹窗会保留“等待选择文件”的任务，可从卡片重新打开；暂停、重启或重试不会跳过确认步骤。
+
+磁力任务由本机 libtorrent 引擎处理，不使用第三方解析网站。每个任务保存到独立目录，避免覆盖已有文件；完成所选文件后停止传输。获取清单和下载速度取决于可用节点，暂时没有节点时可暂停后再继续。
+
 任务可暂停后继续；服务器支持可靠的断点续传时，会接着已有内容下载，不支持时重新下载。任务所选目录不可用时，会回退到默认目录，并在任务中显示说明；默认目录也不可用时，依次尝试系统“下载”目录和应用数据目录中的 `downloads` 文件夹。
 
-连接连续 30 秒没有数据或暂时中断时，任务会在 1、2、4 秒后自动重试，单轮最多三次。有可靠断点标识时从已保存的位置继续，否则安全地重新下载；等待重试时仍可暂停或取消。超过次数后会显示失败，点击“重试”可重新开始一轮。
+HTTP/HTTPS 连接连续 30 秒没有数据或暂时中断时，任务会在 1、2、4 秒后自动重试，单轮最多三次。有可靠断点标识时从已保存的位置继续，否则安全地重新下载；等待重试时仍可暂停或取消。超过次数后会显示失败，点击“重试”可重新开始一轮。
 
 下载历史会保留，应用重启后不会自动发起下载：原下载中的任务变为暂停，暂停或失败的任务可通过“继续”或“重试”恢复。下载完成的文件不会被自动打开或执行，可以使用“打开目录”自行查看；移除完成记录会保留文件。
 
 ## 构建与运行
 
-需要 Windows x64、MSVC x64 C++ 工具链、CMake 3.21 或更新版本、Ninja，以及 **Qt 6.8 或更新版本的 MSVC x64 套件**。Qt 组件需包含 `Core`、`Gui`、`Widgets`、`Network`、`WebChannel`、`WebEngineWidgets`；默认启用测试，还需 `Test`。项目使用 C++17。
+需要 Windows x64、MSVC x64 C++ 工具链、CMake 3.21 或更新版本、Ninja，以及 **Qt 6.8 或更新版本的 MSVC x64 套件**。Qt 组件需包含 `Core`、`Gui`、`Widgets`、`Network`、`WebChannel`、`WebEngineWidgets`；默认启用测试，还需 `Test`。项目使用 C++17；磁力下载依赖 libtorrent 2.1，仓库的 `vcpkg.json` 固定依赖基线并关闭不需要的 WebTorrent 功能。
 
 先打开 Visual Studio 的 **x64 Native Tools Command Prompt（x64 原生工具命令提示符）**，进入克隆的仓库根目录。CMake 和 Ninja 需位于 `PATH`。以下使用已验证的 Qt 6.10.3 举例，请将 Qt 路径替换为自己的安装位置：
 
 ```bat
 set "QT_ROOT=C:\Qt\6.10.3\msvc2022_64"
+set "VCPKG_ROOT=C:\dev\vcpkg"
 set "PATH=%QT_ROOT%\bin;%PATH%"
-cmake --preset x64-release -DCMAKE_PREFIX_PATH="%QT_ROOT%"
+cmake --preset x64-release -DCMAKE_PREFIX_PATH="%QT_ROOT%" -DCMAKE_TOOLCHAIN_FILE="%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows-static-md
 cmake --build --preset x64-release
 ctest --preset x64-release
 ```
@@ -58,6 +63,10 @@ ctest --preset x64-release
 开发者命令提示符负责初始化 MSVC x64 编译器环境，也可手动调用 Visual Studio 安装目录下的 `Common7\Tools\VsDevCmd.bat -arch=x64 -host_arch=x64`。Qt 的 `bin` 加入 `PATH` 供开发运行及测试加载 DLL。若 Ninja 未加入 `PATH`，把其安装目录一并加入，或在配置命令中指定 `-DCMAKE_MAKE_PROGRAM=完整路径`。
 
 项目不固定开发者机器上的 Qt 安装路径。使用 `-DCMAKE_PREFIX_PATH` 指定完整套件，或将个人配置写入已忽略的 `CMakeUserPresets.json`。
+
+`VCPKG_ROOT` 指向已执行 `bootstrap-vcpkg.bat` 的官方 vcpkg 仓库。首次配置会构建磁力依赖；`x64-windows-static-md` 将 libtorrent 及依赖静态链接，同时使用与 Qt 一致的动态 MSVC 运行库。已有独立依赖安装也可通过 `CMAKE_PREFIX_PATH` 提供 `LibtorrentRasterbarConfig.cmake`。从旧构建切换到 vcpkg 工具链时使用新的构建目录，或在 CMake 3.24 及以上添加 `--fresh` 重新配置。
+
+独立依赖还验证过 libtorrent 2.1.2、Boost 1.85 头文件与 OpenSSL 3.6.3 的组合。使用动态 OpenSSL 时，通过 `OPENSSL_ROOT_DIR` 指定同一版本的头文件和库，并将两个 DLL 的完整路径以分号分隔传入 `DESKTOPTOOL_EXTRA_RUNTIME_FILES`；安装流程会将它们放在程序旁。开发运行和测试时也需将其 `bin` 目录加入 `PATH`。标准 vcpkg 静态配置不需要额外 DLL。
 
 调试版本将三个命令的 preset 改为 `x64-debug`。输出分别为：
 
@@ -79,7 +88,8 @@ out\build\web-x64-release\bin\DesktopTool.exe --data-dir "D:\DesktopTool\data"
 - `catalog-services`：旧快捷方式导入、稳定标识、分类与排序、重复校验、损坏文件保护、设置兼容和下载目录校验。
 - `note-service`：便签迁移、图片处理、内容过滤、路径边界、保存失败回滚和排序。
 - `download-service`：使用本地 HTTP 测试服务验证下载、暂停续传、异常响应、目录回退及历史恢复。
-- `web-integration`：在真实 WebEngine 和 WebChannel 中验证页面与 Qt 后端调用，以及下载表单、路径回退、多任务卡片、暂停/继续/取消和逐字节文件比对；测试关闭托盘和全局热键，使用离屏模式及本机 HTTP 服务。
+- `torrent-service`：使用本机做种端验证磁力元数据、确认前不下载内容、文件子集、暂停取消及历史恢复。
+- `web-integration`：在真实 WebEngine 和 WebChannel 中验证页面与 Qt 后端调用，以及下载表单、路径回退、多任务卡片、暂停/继续/取消、磁力文件勾选弹窗和逐字节文件比对；测试关闭托盘和全局热键，使用离屏模式及本机 HTTP/BitTorrent 服务。
 
 测试结果以当前构建运行时的 CTest 输出为准。真实系统的托盘、热键占用和最终发布目录运行仍需在目标 Windows 环境检查。
 
@@ -101,6 +111,8 @@ pack\pack_app.bat
 
 该脚本使用相同的 CMake 安装流程部署到 `pack/app`。Qt 官方部署脚本会部署应用依赖、WebEngine 子进程、资源和语言包，分发时应包含整个目录。两个包装脚本均检查错误码，且不移动、删除或自动复制用户数据。如果发布目标目录已有历史数据，发布前自行确认是否适合分发。
 
+磁力引擎及其依赖的分发许可证保存在 `third_party/licenses`，安装时复制到应用的 `licenses` 目录，发布时应一并保留。
+
 脚本使用 `PATH` 中的 `cmake.exe`；也可通过 `DESKTOPTOOL_CMAKE` 环境变量指定 CMake 可执行文件。变量值只填写路径，不附加命令参数。例如：
 
 ```bat
@@ -119,6 +131,7 @@ pack\pack_app.bat
 | 便签内容 | 保存为 HTML；合法图片由服务处理。删除便签仅移除索引记录，磁盘内容保留，可用于人工恢复 |
 | 设置 | 继续使用 `data/setting/system_config.json`，兼容 `tree_view_font_size`、`hotkey_modifier`、`hotkey_key`，新增 `download_directory`；旧文件缺少该字段时使用系统下载目录，保留其他未知字段 |
 | 下载历史 | `data/download-tasks.v1.json`，保存来源、目录、状态和续传标识；部分文件位于任务下载目录，取消时仅清理该任务自己的部分文件 |
+| 磁力历史 | `data/magnet-tasks.v1.json`，独立保存元数据及文件选择；尚未确认的任务重启后仍等待选择，不自动下载内容 |
 
 旧逗号分隔快捷方式存在无法无歧义识别的行时，会返回中文导入警告，不猜测字段，也不会更改原文件。新版 JSON 或索引损坏时，相关服务会报告错误并禁止覆盖；修复或从备份恢复文件后重启应用。删除过的便签不会在下次启动时自动重新导入。
 

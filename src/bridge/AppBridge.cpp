@@ -94,6 +94,9 @@ QVariantMap AppBridge::createDownload(const QVariantMap& task)
         settings.value(QStringLiteral("data")).toMap().value(QStringLiteral("downloadDirectory")).toString());
 }
 
+QVariantMap AppBridge::getDownloadFiles(const QString& id) const { return m_downloads->files(id); }
+QVariantMap AppBridge::confirmDownloadFiles(const QString& id, const QVariantList& indices)
+{ return m_downloads->confirmFiles(id, indices); }
 QVariantMap AppBridge::pauseDownload(const QString& id) { return m_downloads->pauseTask(id); }
 QVariantMap AppBridge::resumeDownload(const QString& id) { return m_downloads->resumeTask(id); }
 QVariantMap AppBridge::cancelDownload(const QString& id) { return m_downloads->cancelTask(id); }

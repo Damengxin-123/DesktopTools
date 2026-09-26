@@ -1,5 +1,6 @@
 #include "DownloadService.h"
 #include "ServiceResult.h"
+#include "TorrentService.h"
 
 #include <QDateTime>
 #include <QCoreApplication>
@@ -21,6 +22,7 @@
 #include <QTimer>
 #include <QUuid>
 #include <limits>
+#include <algorithm>
 
 namespace {
 /** 单次读写缓冲区上限，下载大文件时保持内存使用稳定。 */
@@ -99,7 +101,9 @@ DownloadService::DownloadService(const QString& dataRoot, QObject* parent)
     , m_indexPath(QDir(m_dataRoot).filePath(QStringLiteral("download-tasks.v1.json")))
     , m_notifyTimer(new QTimer(this))
     , m_checkpointTimer(new QTimer(this))
+    , m_torrents(new TorrentService(m_dataRoot, this))
 {
+    connect(m_torrents, &TorrentService::changed, this, &DownloadService::changed);
     m_notifyTimer->setSingleShot(true);
     m_notifyTimer->setInterval(200);
     m_checkpointTimer->setSingleShot(true);
@@ -166,7 +170,8 @@ QString DownloadService::partPath(const Task& task)
 
 QVariantMap DownloadService::taskData(const Task& task)
 {
-    return {{QStringLiteral("id"), task.id}, {QStringLiteral("url"), task.url.toString(QUrl::FullyEncoded)},
+    return {{QStringLiteral("id"), task.id}, {QStringLiteral("kind"), QStringLiteral("http")},
+        {QStringLiteral("url"), task.url.toString(QUrl::FullyEncoded)},
         {QStringLiteral("fileName"), task.fileName}, {QStringLiteral("directory"), task.directory},
         {QStringLiteral("filePath"), QDir(task.directory).filePath(task.fileName)},
         {QStringLiteral("status"), task.status}, {QStringLiteral("bytesReceived"), task.bytesReceived},
@@ -187,11 +192,27 @@ QVariantMap DownloadService::snapshot() const
         if (task->status == QStringLiteral("downloading"))
             ++activeCount;
     }
+    const auto torrents = m_torrents->snapshot();
+    if (!torrents.value(QStringLiteral("ok")).toBool()) {
+        // 磁力历史独立保护，不能因为新增索引损坏而隐藏现有 HTTP 下载。
+        return ServiceResult::success(QVariantMap{{QStringLiteral("items"), items}, {QStringLiteral("activeCount"), activeCount},
+            {QStringLiteral("warnings"), QStringList{QStringLiteral("磁力下载历史暂不可用：") + torrents.value(QStringLiteral("error")).toString()}}});
+    }
+    const auto torrentData = torrents.value(QStringLiteral("data")).toMap();
+    items.append(torrentData.value(QStringLiteral("items")).toList());
+    activeCount += torrentData.value(QStringLiteral("activeCount")).toInt();
+    // 两类任务保持统一的创建时间顺序，相同时保留各服务原有顺序。
+    std::stable_sort(items.begin(), items.end(), [](const QVariant& left, const QVariant& right) {
+        return left.toMap().value(QStringLiteral("createdAt")).toString()
+            < right.toMap().value(QStringLiteral("createdAt")).toString();
+    });
     return ServiceResult::success(QVariantMap{{QStringLiteral("items"), items}, {QStringLiteral("activeCount"), activeCount}});
 }
 
 bool DownloadService::hasActiveTasks() const
 {
+    if (m_torrents->hasActiveTasks())
+        return true;
     for (const auto& task : m_tasks) {
         if (task->status == QStringLiteral("downloading"))
             return true;
@@ -381,8 +402,15 @@ QVariantMap DownloadService::createTask(const QString& urlText, const QString& d
     if (!m_loadError.isEmpty())
         return ServiceResult::failure(m_loadError);
     QUrl url(urlText.trimmed(), QUrl::StrictMode);
+    if (url.scheme().compare(QStringLiteral("magnet"), Qt::CaseInsensitive) == 0) {
+        QString warning;
+        const QString selectedDirectory = chooseDirectory(directory, defaultDirectory, warning);
+        if (selectedDirectory.isEmpty())
+            return ServiceResult::failure(QStringLiteral("指定目录、默认目录和备用下载目录均不可写，请重新选择目录。"));
+        return m_torrents->createTask(urlText.trimmed(), selectedDirectory, warning);
+    }
     if (!validUrl(url))
-        return ServiceResult::failure(QStringLiteral("请输入有效的 http:// 或 https:// 下载链接；链接不能包含用户名和密码。"));
+        return ServiceResult::failure(QStringLiteral("请输入有效的 http://、https:// 或 magnet:? 下载链接；链接不能包含用户名和密码。"));
     url.setFragment(QString());
     auto task = std::make_shared<Task>();
     task->id = QUuid::createUuid().toString(QUuid::Id128);
@@ -406,6 +434,20 @@ QVariantMap DownloadService::createTask(const QString& urlText, const QString& d
         return ServiceResult::failure(error);
     }
     return ServiceResult::success(taskData(*task));
+}
+
+QVariantMap DownloadService::files(const QString& id) const
+{
+    if (!id.startsWith(QStringLiteral("magnet-")))
+        return ServiceResult::failure(QStringLiteral("只有磁力任务需要选择下载文件。"));
+    return m_torrents->files(id);
+}
+
+QVariantMap DownloadService::confirmFiles(const QString& id, const QVariantList& indices)
+{
+    if (!id.startsWith(QStringLiteral("magnet-")))
+        return ServiceResult::failure(QStringLiteral("只有磁力任务需要确认文件选择。"));
+    return m_torrents->confirmFiles(id, indices);
 }
 
 bool DownloadService::start(const TaskPtr& task, QString& error)
@@ -756,6 +798,8 @@ void DownloadService::fail(const TaskPtr& task, const QString& error)
 
 QVariantMap DownloadService::pauseTask(const QString& id)
 {
+    if (id.startsWith(QStringLiteral("magnet-")))
+        return m_torrents->pauseTask(id);
     if (!m_loadError.isEmpty())
         return ServiceResult::failure(m_loadError);
     const auto task = m_tasks.value(id);
@@ -776,6 +820,8 @@ QVariantMap DownloadService::pauseTask(const QString& id)
 
 QVariantMap DownloadService::resumeTask(const QString& id)
 {
+    if (id.startsWith(QStringLiteral("magnet-")))
+        return m_torrents->resumeTask(id);
     if (!m_loadError.isEmpty())
         return ServiceResult::failure(m_loadError);
     const auto task = m_tasks.value(id);
@@ -807,6 +853,8 @@ bool DownloadService::removePartial(const TaskPtr& task, QString& error)
 
 QVariantMap DownloadService::cancelTask(const QString& id)
 {
+    if (id.startsWith(QStringLiteral("magnet-")))
+        return m_torrents->cancelTask(id);
     if (!m_loadError.isEmpty())
         return ServiceResult::failure(m_loadError);
     const auto task = m_tasks.value(id);
@@ -835,6 +883,8 @@ QVariantMap DownloadService::cancelTask(const QString& id)
 
 QVariantMap DownloadService::removeTask(const QString& id)
 {
+    if (id.startsWith(QStringLiteral("magnet-")))
+        return m_torrents->removeTask(id);
     if (!m_loadError.isEmpty())
         return ServiceResult::failure(m_loadError);
     const auto task = m_tasks.value(id);
@@ -864,6 +914,8 @@ QVariantMap DownloadService::removeTask(const QString& id)
 
 QVariantMap DownloadService::openDirectory(const QString& id)
 {
+    if (id.startsWith(QStringLiteral("magnet-")))
+        return m_torrents->openDirectory(id);
     if (!m_loadError.isEmpty())
         return ServiceResult::failure(m_loadError);
     const auto task = m_tasks.value(id);

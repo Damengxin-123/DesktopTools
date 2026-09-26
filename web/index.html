@@ -61,7 +61,8 @@
         <section class="page downloads-page" id="page-downloads" aria-labelledby="downloads-heading" hidden>
           <header class="page-header"><div><div class="eyebrow">DOWNLOAD MANAGER</div><h1 id="downloads-heading">下载</h1><p>集中管理下载任务，随时暂停与继续。</p></div><span class="download-active-badge"><span class="status-dot" aria-hidden="true"></span><span id="download-active-count">0 个任务进行中</span></span></header>
           <form id="download-form" class="download-form">
-            <label class="form-field" for="download-url"><span>下载链接</span><div class="download-link-row"><input id="download-url" name="download-url" type="url" required placeholder="粘贴 http:// 或 https:// 下载链接" autocomplete="off" spellcheck="false"><button id="add-download" type="submit" class="button primary">↓ 创建下载</button></div></label>
+            <label class="form-field" for="download-url"><span>下载链接</span><div class="download-link-row"><input id="download-url" name="download-url" type="text" required placeholder="粘贴 HTTP、HTTPS 或 magnet:? 磁力链接" autocomplete="off" spellcheck="false" aria-describedby="download-link-help"><button id="add-download" type="submit" class="button primary">↓ 创建下载</button></div></label>
+            <p id="download-link-help" class="field-help download-link-help">磁力链接会先获取文件列表，确认所选文件后才开始下载。</p>
             <label class="form-field" for="download-directory"><span>保存到 <small>可选</small></span><div class="input-with-button"><input id="download-directory" name="download-directory" type="text" placeholder="留空使用默认下载目录" autocomplete="off" spellcheck="false"><button id="choose-download-directory" type="button" class="button secondary">选择目录…</button><button id="use-default-download-directory" type="button" class="button quiet">使用默认</button></div></label>
             <div class="download-directory-help"><p id="download-default-hint" class="field-help">默认下载目录正在读取…</p><p class="field-help">留空或目录无效时，将使用设置中的默认下载目录。</p></div>
             <p id="download-create-error" class="field-error" role="alert" hidden></p>
@@ -88,5 +89,17 @@
   <div id="busy-indicator" class="busy-indicator" role="status" hidden><span class="spinner"></span>正在处理…</div>
   <div id="toast-region" class="toast-region" role="status" aria-live="polite" aria-atomic="true"></div>
   <dialog id="app-dialog" class="app-dialog"><form id="dialog-form"><div class="dialog-heading"><h2 id="dialog-title"></h2><button id="dialog-close" type="button" class="icon-button" aria-label="关闭">×</button></div><div id="dialog-body"></div><p id="dialog-error" class="field-error" role="alert" hidden></p><div class="dialog-actions"><button id="dialog-cancel" type="button" class="button secondary">取消</button><button id="dialog-submit" type="submit" class="button primary">保存</button></div></form></dialog>
+  <dialog id="download-files-dialog" class="app-dialog download-files-dialog" aria-labelledby="download-files-title" aria-describedby="download-files-description">
+    <form id="download-files-form">
+      <div class="dialog-heading"><h2 id="download-files-title">选择要下载的文件</h2><button id="download-files-close" type="button" class="icon-button" aria-label="暂不选择，关闭文件列表">×</button></div>
+      <p id="download-files-name" class="download-files-name"></p>
+      <p id="download-files-description" class="dialog-description">勾选需要的文件，再点击“开始下载”。关闭后任务会保留，可从卡片重新选择。</p>
+      <p id="download-files-loading" class="field-help" role="status">正在读取文件列表…</p>
+      <div class="download-files-toolbar"><button id="download-files-all" type="button" class="button secondary small">全选</button><button id="download-files-none" type="button" class="button secondary small">全不选</button><span id="download-files-summary" role="status" aria-live="polite">尚未读取文件列表</span></div>
+      <div id="download-files-list" class="download-files-list" role="group" aria-label="磁力链接中的文件"></div>
+      <p id="download-files-error" class="field-error" role="alert" hidden></p>
+      <div class="dialog-actions"><button id="download-files-reload" type="button" class="button quiet" hidden>重新读取</button><button id="download-files-later" type="button" class="button secondary">稍后选择</button><button id="download-files-confirm" type="submit" class="button primary" disabled>开始下载</button></div>
+    </form>
+  </dialog>
 </body>
 </html>

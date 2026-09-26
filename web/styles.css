@@ -6,6 +6,7 @@
 @media(max-width:620px){.sidebar{width:66px;flex-basis:66px;padding:18px 8px}.brand{margin:0 auto 28px}.brand>div,.nav-label,.nav-count,.sidebar-bottom{display:none}.nav-button{font-size:0;justify-content:center;padding:12px 8px;gap:0}.nav-button>span:first-child{font-size:23px}.main-content{margin-left:66px;width:calc(100% - 66px);padding:23px 15px}.page-header{align-items:flex-start;flex-direction:column;margin-bottom:22px}.page-header p{font-size:12px}.section-toolbar{gap:9px}.section-toolbar>.button{font-size:10px;padding:10px}.category-bar{gap:6px}.notes-layout{display:flex;flex-direction:column;height:auto}.note-browser{max-height:220px}.editor-panel{min-height:450px}.note-editor{max-height:55vh;min-height:220px}.busy-indicator{left:calc(50% + 33px)}.toast-region{right:16px;left:82px}.shortcut-grid{grid-template-columns:1fr}.settings-card{padding:19px}.selection-toolbar{gap:8px}.selection-toolbar>span{font-size:10px}}
 /* 下载页采用固定单列卡片，进度更新只改变数值与进度条宽度。 */
 .downloads-page{max-width:1050px}
+.download-link-help{margin:-4px 0 19px;color:#8e9bb0;font-size:12px}
 .download-active-badge{display:inline-flex;align-items:center;gap:8px;background:#fff;border:1px solid var(--line);border-radius:20px;padding:9px 13px;font-size:12px;color:#8b96a8;white-space:nowrap}
 .download-active-badge.active{background:var(--accent-soft);border-color:#dfe6ff;color:#6581d6}
 .download-active-badge.active .status-dot{background:var(--accent)}
@@ -31,6 +32,9 @@
 .download-source{font-size:12px;color:#a0abbd;margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .download-status{border-radius:5px;background:#f0f3f8;color:#8b97aa;padding:5px 8px;font-size:12px;flex-shrink:0}
 .download-card[data-status=downloading] .download-status{background:#edf2ff;color:#607cd2}
+.download-card[data-status=resolving] .download-status{background:#edf2ff;color:#607cd2}
+.download-card[data-status=awaiting_selection] .download-status{background:#fff7e8;color:#ad8a43}
+.download-card[data-status=awaiting_selection] .download-progress{opacity:.6}
 .download-card[data-status=completed] .download-status{background:#eaf6f1;color:#549d83}
 .download-card[data-status=completed] .download-file-icon{background:#f0f8f5;border-color:#e5f1eb;color:#67a68f}
 .download-card[data-status=failed] .download-status{background:#fff0f1;color:#bc7078}
@@ -57,6 +61,23 @@
 .download-warning{color:#a69058;background:#fffbef}
 .download-error{color:#bc6872;background:#fff5f5}
 .download-background-hint{color:#a3adbe;font-size:12px;line-height:1.8;margin:19px 2px 0}
+.download-files-dialog{width:700px;padding:25px 28px}
+.download-files-dialog .dialog-heading{margin-bottom:15px}
+.download-files-name{margin:0 0 9px;font-size:14px;font-weight:600;color:#536681;overflow-wrap:anywhere}
+.download-files-dialog .dialog-description{font-size:12px;line-height:1.8;margin-bottom:18px}
+.download-files-toolbar{display:flex;align-items:center;gap:8px;margin:15px 0 12px;font-size:12px}
+.download-files-toolbar>span{margin-left:auto;color:#8d9bb0;font-variant-numeric:tabular-nums;text-align:right}
+.download-files-list{max-height:min(46vh,380px);overflow:auto;border:1px solid var(--line);border-radius:8px;background:#fcfdff;overscroll-behavior:contain}
+.download-files-list:empty{display:none}
+.download-file-row{display:flex;align-items:flex-start;gap:11px;padding:13px 14px;cursor:pointer;border-bottom:1px solid #edf1f7;line-height:1.6;font-size:13px}
+.download-file-row:last-child{border-bottom:0}
+.download-file-row:hover,.download-file-row:focus-within{background:#f1f5ff}
+.download-file-row>input{flex-shrink:0;margin:4px 0 0;accent-color:var(--accent)}
+.download-file-path{flex:1;min-width:0;overflow-wrap:anywhere;color:#52627c}
+.download-file-size{flex-shrink:0;white-space:nowrap;color:#93a0b4;font-size:12px;font-variant-numeric:tabular-nums}
+.download-files-dialog .dialog-actions{margin-top:19px}
+#download-files-reload{margin-right:auto}
+@media(max-width:620px){.download-files-dialog{padding:20px}.download-files-toolbar{flex-wrap:wrap}.download-files-toolbar>span{flex-basis:100%;text-align:left;margin:3px 0}.download-file-row{padding:11px 10px;gap:9px;font-size:12px}.download-file-size{font-size:11px}.download-files-dialog .dialog-actions{gap:7px;flex-wrap:wrap}}
 .settings-directory{margin-bottom:0}
 .settings-directory>span{color:#536078;font-size:13px;font-weight:500}
 .settings-directory input{font-size:12px}

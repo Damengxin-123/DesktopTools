@@ -240,6 +240,8 @@ private slots:
     void restartsOnceAfterUnsatisfiableRange();
     /** 索引保存失败时取消和移除都保留原部分文件。 */
     void preservesPartialWhenIndexCannotBeSaved();
+    /** 磁力索引损坏时仍能读取、创建和完成原有 HTTP 任务。 */
+    void isolatesDamagedMagnetHistory();
 };
 
 void DownloadServiceTest::downloadsConcurrentlyWithoutOverwriting()
@@ -640,6 +642,30 @@ void DownloadServiceTest::preservesPartialWhenIndexCannotBeSaved()
     QCOMPARE(readFile(failedPart), failedBefore);
     QCOMPARE(task(service, pausedId).value(QStringLiteral("status")).toString(), QStringLiteral("paused"));
     QCOMPARE(task(service, failedId).value(QStringLiteral("status")).toString(), QStringLiteral("failed"));
+}
+
+void DownloadServiceTest::isolatesDamagedMagnetHistory()
+{
+    QTemporaryDir root;
+    DownloadHttpFixture server;
+    QVERIFY(root.isValid() && server.listening());
+    const QString dataRoot = root.filePath(QStringLiteral("data"));
+    QVERIFY(QDir().mkpath(dataRoot));
+    const QString index = QDir(dataRoot).filePath(QStringLiteral("magnet-tasks.v1.json"));
+    const QByteArray damaged("{damaged magnet history");
+    QVERIFY(writeFile(index, damaged));
+    {
+        DownloadService service(dataRoot);
+        const auto initial = service.snapshot();
+        QVERIFY(ok(initial));
+        QVERIFY(!data(initial).value(QStringLiteral("warnings")).toStringList().isEmpty());
+        const auto created = service.createTask(server.url(QStringLiteral("range.bin")), root.path(), root.path());
+        QVERIFY(ok(created));
+        const QString id = data(created).value(QStringLiteral("id")).toString();
+        QTRY_COMPARE_WITH_TIMEOUT(task(service, id).value(QStringLiteral("status")).toString(), QStringLiteral("completed"), 10000);
+        QCOMPARE(readFile(task(service, id).value(QStringLiteral("filePath")).toString()), server.payload());
+    }
+    QCOMPARE(readFile(index), damaged);
 }
 
 QTEST_GUILESS_MAIN(DownloadServiceTest)
