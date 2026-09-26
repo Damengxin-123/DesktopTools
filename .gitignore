@@ -369,6 +369,7 @@ FodyWeavers.xsd
 /pack/app/
 /data/
 /CMakeUserPresets.json
+/vcpkg_installed/
 CMakeFiles/
 CMakeCache.txt
 cmake_install.cmake

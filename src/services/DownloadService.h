@@ -13,8 +13,9 @@ class QFile;
 class QNetworkAccessManager;
 class QNetworkReply;
 class QTimer;
+class TorrentService;
 
-/** 管理相互独立的 HTTP 下载任务、断点恢复及持久化历史。 */
+/** 统一管理 HTTP 和磁力下载任务、断点恢复及持久化历史。 */
 class DownloadService final : public QObject
 {
     Q_OBJECT
@@ -27,6 +28,10 @@ public:
     QVariantMap snapshot() const;
     /** 创建下载任务；无效指定目录按默认目录及系统目录顺序回退。 */
     QVariantMap createTask(const QString& url, const QString& directory, const QString& defaultDirectory);
+    /** 读取磁力任务的文件清单，只返回已经验证的元数据。 */
+    QVariantMap files(const QString& id) const;
+    /** 确认用户勾选的磁力文件索引，确认前不下载文件内容。 */
+    QVariantMap confirmFiles(const QString& id, const QVariantList& indices);
     /** 暂停任务并保留已写入的部分内容。 */
     QVariantMap pauseTask(const QString& id);
     /** 继续暂停或失败的任务，并校验服务器断点响应。 */
@@ -124,4 +129,5 @@ private:
     QStringList m_order;           ///< 任务卡片的创建顺序。
     QTimer* m_notifyTimer;         ///< 高频进度通知的合并计时器。
     QTimer* m_checkpointTimer;     ///< 下载中索引检查点的合并计时器。
+    TorrentService* m_torrents;    ///< 独立的磁力解析、文件选择和 BitTorrent 传输服务。
 };

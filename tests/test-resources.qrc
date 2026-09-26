@@ -2,5 +2,6 @@
   <qresource prefix="/tests">
     <file>web-smoke.js</file>
     <file>download-smoke.js</file>
+    <file>magnet-smoke.js</file>
   </qresource>
 </RCC>

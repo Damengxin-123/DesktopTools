@@ -2,12 +2,14 @@
 #include "app/GlobalHotkey.h"
 #include "bridge/AppBridge.h"
 #include "DownloadPageServer.h"
+#include "TorrentTestPeer.h"
 
 #include <QApplication>
 #include <QElapsedTimer>
 #include <QDir>
 #include <QEventLoop>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QPointer>
@@ -29,6 +31,8 @@ private slots:
     void settingsTransaction();
     // 从下载页面创建任务，验证目录回退、多任务和控制按钮的真实桥接。
     void downloadsThroughPage();
+    // 使用本机磁力做种端验证解析、勾选弹窗及确认后只下载选中文件。
+    void magnetsThroughPage();
     // 下载历史损坏时只禁用下载操作，既有页面仍然可用。
     void damagedDownloadHistoryIsIsolated();
 private:
@@ -158,7 +162,7 @@ void WebSmokeTest::downloadsThroughPage()
     WebWindow window(data.filePath(QStringLiteral("app-data")), false);
     window.show();
     auto* page = window.webView()->page();
-    QTRY_VERIFY_WITH_TIMEOUT(evaluate(page, QStringLiteral("document.documentElement.dataset.ready === 'true'")).toBool(), 20000);
+    QTRY_VERIFY_WITH_TIMEOUT(evaluate(page, QStringLiteral("document.documentElement && document.documentElement.dataset.ready === 'true'")).toBool(), 20000);
     const QJsonObject fixture{
         {QStringLiteral("baseUrl"), QStringLiteral("http://127.0.0.1:%1").arg(server.serverPort())},
         {QStringLiteral("defaultDirectory"), defaultDirectory},
@@ -202,6 +206,92 @@ void WebSmokeTest::downloadsThroughPage()
     }
 }
 
+void WebSmokeTest::magnetsThroughPage()
+{
+    QTemporaryDir data;
+    QVERIFY(data.isValid());
+    const QString source = data.filePath(QStringLiteral("seed"));
+    const QString destination = data.filePath(QStringLiteral("downloads"));
+    QVERIFY(QDir().mkpath(destination));
+    TorrentTestPeer peer(source);
+    QVERIFY2(peer.isValid(), qPrintable(peer.error()));
+    TorrentTestPeer secondPeer(data.filePath(QStringLiteral("second-seed")), 1);
+    QVERIFY2(secondPeer.isValid(), qPrintable(secondPeer.error()));
+    WebWindow window(data.filePath(QStringLiteral("app-data")), false);
+    window.show();
+    auto* bridge = window.findChild<AppBridge*>();
+    QVERIFY(bridge);
+    auto* page = window.webView()->page();
+    QTRY_VERIFY_WITH_TIMEOUT(evaluate(page, QStringLiteral("document.documentElement && document.documentElement.dataset.ready === 'true'")).toBool(), 20000);
+    const QJsonObject fixture = QJsonObject::fromVariantMap({
+        {QStringLiteral("magnet"), peer.magnet()}, {QStringLiteral("directory"), destination},
+        {QStringLiteral("files"), peer.files()}, {QStringLiteral("holdForInspection"), true},
+        {QStringLiteral("magnetSecond"), secondPeer.magnet()}});
+    evaluate(page, QStringLiteral("window.__magnetFixture = ")
+        + QString::fromUtf8(QJsonDocument(fixture).toJson(QJsonDocument::Compact)) + QLatin1Char(';'));
+    QFile script(QStringLiteral(":/tests/magnet-smoke.js"));
+    QVERIFY(script.open(QIODevice::ReadOnly));
+    evaluate(page, QString::fromUtf8(script.readAll()));
+    QElapsedTimer timer;
+    timer.start();
+    QVariantMap outcome;
+    bool inspected = false; // 确认前只检查一次磁盘与离屏弹窗。
+    while (timer.elapsed() < 60000) {
+        const auto ready = evaluate(page, QStringLiteral("window.__magnetSelectionReady || null")).toMap();
+        if (!inspected && !ready.isEmpty()) {
+            QVariantMap waiting;
+            const auto items = bridge->getDownloads().value(QStringLiteral("data")).toMap().value(QStringLiteral("items")).toList();
+            for (const auto& item : items) {
+                if (item.toMap().value(QStringLiteral("id")) == ready.value(QStringLiteral("id")))
+                    waiting = item.toMap();
+            }
+            QCOMPARE(waiting.value(QStringLiteral("status")).toString(), QStringLiteral("awaiting_selection"));
+            QVERIFY(!waiting.value(QStringLiteral("selectionConfirmed")).toBool());
+            QCOMPARE(waiting.value(QStringLiteral("bytesReceived")).toLongLong(), qint64(0));
+            for (const auto& item : peer.files())
+                QVERIFY(!QFileInfo::exists(QDir(waiting.value(QStringLiteral("filePath")).toString()).filePath(item.toMap().value(QStringLiteral("path")).toString())));
+            const QString capturePath = qEnvironmentVariable("DESKTOPTOOL_TEST_CAPTURE");
+            if (!capturePath.isEmpty()) {
+                window.resize(1180, 960); // 离屏模式通过尺寸变化请求 Chromium 合成最新弹窗帧。
+                QTest::qWait(500);
+                QVERIFY(window.grab().save(capturePath + QStringLiteral(".magnet-selection.png")));
+            }
+            inspected = true;
+            evaluate(page, QStringLiteral("window.__magnetAllowConfirm = true; true"));
+        }
+        outcome = evaluate(page, QStringLiteral("window.__magnetSmokeResult || null")).toMap();
+        if (!outcome.isEmpty())
+            break;
+        QTest::qWait(50);
+    }
+    QVERIFY2(!outcome.isEmpty(), "磁力下载网页测试超时");
+    QVERIFY2(outcome.value(QStringLiteral("ok")).toBool(), qPrintable(outcome.value(QStringLiteral("error")).toString()));
+    QVERIFY(inspected);
+    const QString id = outcome.value(QStringLiteral("id")).toString();
+    const auto filesResult = bridge->getDownloadFiles(id);
+    QVERIFY(filesResult.value(QStringLiteral("ok")).toBool());
+    QVariantMap completed;
+    for (const auto& item : bridge->getDownloads().value(QStringLiteral("data")).toMap().value(QStringLiteral("items")).toList()) {
+        if (item.toMap().value(QStringLiteral("id")).toString() == id)
+            completed = item.toMap();
+    }
+    QCOMPARE(completed.value(QStringLiteral("status")).toString(), QStringLiteral("completed"));
+    QCOMPARE(completed.value(QStringLiteral("selectedCount")).toInt(), 1);
+    for (const auto& item : filesResult.value(QStringLiteral("data")).toMap().value(QStringLiteral("files")).toList()) {
+        const auto file = item.toMap();
+        const QString path = QDir(completed.value(QStringLiteral("filePath")).toString()).filePath(file.value(QStringLiteral("path")).toString());
+        if (file.value(QStringLiteral("selected")).toBool()) {
+            QFile actual(path), expected(QDir(source).filePath(file.value(QStringLiteral("path")).toString()));
+            QVERIFY(actual.open(QIODevice::ReadOnly));
+            QVERIFY(expected.open(QIODevice::ReadOnly));
+            QCOMPARE(actual.readAll(), expected.readAll());
+        } else {
+            QVERIFY2(!QFileInfo::exists(path), qPrintable(path));
+        }
+    }
+    qInfo().noquote() << outcome.value(QStringLiteral("summary")).toString();
+}
+
 void WebSmokeTest::damagedDownloadHistoryIsIsolated()
 {
     QTemporaryDir data;
@@ -213,7 +303,7 @@ void WebSmokeTest::damagedDownloadHistoryIsIsolated()
     WebWindow window(data.path(), false);
     window.show();
     auto* page = window.webView()->page();
-    QTRY_VERIFY_WITH_TIMEOUT(evaluate(page, QStringLiteral("document.documentElement.dataset.ready === 'true'")).toBool(), 20000);
+    QTRY_VERIFY_WITH_TIMEOUT(evaluate(page, QStringLiteral("document.documentElement && document.documentElement.dataset.ready === 'true'")).toBool(), 20000);
     QVERIFY(evaluate(page, QStringLiteral("!document.querySelector('#workspace').inert && document.querySelector('#connection-error').hidden")).toBool());
     evaluate(page, QStringLiteral("document.querySelector('[data-page=downloads]').click(); true"));
     QVERIFY(evaluate(page, QStringLiteral("!document.querySelector('#download-list-error').hidden && document.querySelector('#download-list-error').textContent.length > 0")).toBool());
@@ -228,7 +318,7 @@ int main(int argc, char** argv)
 {
     QApplication app(argc, argv);
     app.setApplicationName(QStringLiteral("DesktopToolWebTest"));
-    app.setApplicationVersion(QStringLiteral("2.1.0-test"));
+    app.setApplicationVersion(QStringLiteral("2.2.0-test"));
     WebSmokeTest test;
     return QTest::qExec(&test, argc, argv);
 }
