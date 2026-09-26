@@ -1,6 +1,7 @@
 #include "app/WebWindow.h"
 #include "app/GlobalHotkey.h"
 #include "bridge/AppBridge.h"
+#include "DownloadPageServer.h"
 
 #include <QApplication>
 #include <QElapsedTimer>
@@ -8,6 +9,7 @@
 #include <QEventLoop>
 #include <QFile>
 #include <QJsonDocument>
+#include <QJsonObject>
 #include <QPointer>
 #include <QTemporaryDir>
 #include <QTest>
@@ -25,6 +27,10 @@ private slots:
     void htmlAndBackend();
     // 检查两阶段热键切换以及配置写入失败后的旧组合保留。
     void settingsTransaction();
+    // 从下载页面创建任务，验证目录回退、多任务和控制按钮的真实桥接。
+    void downloadsThroughPage();
+    // 下载历史损坏时只禁用下载操作，既有页面仍然可用。
+    void damagedDownloadHistoryIsIsolated();
 private:
     // 同步等待一次短 JavaScript 求值，带超时防止测试挂起。
     static QVariant evaluate(QWebEnginePage* page, const QString& source);
@@ -48,7 +54,8 @@ void WebSmokeTest::settingsTransaction()
     QVERIFY(data.isValid());
     QWidget owner;
     AppBridge bridge(data.path(), &owner, false);
-    const QVariantMap previous = bridge.getSettings().value("data").toMap();
+    QVariantMap previous = bridge.getSettings().value("data").toMap();
+    previous.insert(QStringLiteral("downloadDirectory"), data.path());
     QVERIFY(bridge.saveSettings(previous).value("ok").toBool());
     const QString config = data.filePath("setting/system_config.json");
     QVERIFY(QFile::rename(config, config + ".original"));
@@ -134,12 +141,94 @@ void WebSmokeTest::htmlAndBackend()
     }
 }
 
+void WebSmokeTest::downloadsThroughPage()
+{
+    QTemporaryDir data;
+    QVERIFY(data.isValid());
+    const QString defaultDirectory = data.filePath(QStringLiteral("default-downloads"));
+    const QString customDirectory = data.filePath(QStringLiteral("custom-downloads"));
+    QVERIFY(QDir().mkpath(defaultDirectory));
+    QVERIFY(QDir().mkpath(customDirectory));
+    QFile blocked(data.filePath(QStringLiteral("not-a-directory")));
+    QVERIFY(blocked.open(QIODevice::WriteOnly));
+    blocked.write("existing user file");
+    blocked.close();
+    DownloadPageServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost));
+    WebWindow window(data.filePath(QStringLiteral("app-data")), false);
+    window.show();
+    auto* page = window.webView()->page();
+    QTRY_VERIFY_WITH_TIMEOUT(evaluate(page, QStringLiteral("document.documentElement.dataset.ready === 'true'")).toBool(), 20000);
+    const QJsonObject fixture{
+        {QStringLiteral("baseUrl"), QStringLiteral("http://127.0.0.1:%1").arg(server.serverPort())},
+        {QStringLiteral("defaultDirectory"), defaultDirectory},
+        {QStringLiteral("customDirectory"), customDirectory},
+        {QStringLiteral("invalidDirectory"), blocked.fileName()}
+    };
+    evaluate(page, QStringLiteral("window.__downloadFixture = ")
+        + QString::fromUtf8(QJsonDocument(fixture).toJson(QJsonDocument::Compact)) + QStringLiteral("; true"));
+    QFile script(QStringLiteral(":/tests/download-smoke.js"));
+    QVERIFY(script.open(QIODevice::ReadOnly));
+    evaluate(page, QString::fromUtf8(script.readAll()));
+    QVariantMap outcome;
+    QElapsedTimer timer;
+    timer.start();
+    while (timer.elapsed() < 45000) {
+        outcome = evaluate(page, QStringLiteral("window.__downloadSmokeResult || null")).toMap();
+        if (!outcome.isEmpty())
+            break;
+        QTest::qWait(100);
+    }
+    QVERIFY2(!outcome.isEmpty(), "下载页面测试超时");
+    QVERIFY2(outcome.value("ok").toBool(), qPrintable(outcome.value("error").toString()));
+    for (const auto& value : outcome.value(QStringLiteral("completed")).toList()) {
+        const auto task = value.toMap();
+        QFile downloaded(task.value(QStringLiteral("filePath")).toString());
+        QVERIFY(downloaded.open(QIODevice::ReadOnly));
+        const QByteArray expected = DownloadPageServer::body(QUrl(task.value(QStringLiteral("url")).toString()).path().toUtf8());
+        QCOMPARE(downloaded.readAll(), expected);
+    }
+    QVERIFY(blocked.open(QIODevice::ReadOnly));
+    QCOMPARE(blocked.readAll(), QByteArray("existing user file"));
+    const QString capturePath = qEnvironmentVariable("DESKTOPTOOL_TEST_CAPTURE");
+    if (!capturePath.isEmpty()) {
+        window.resize(1180, 1260);
+        evaluate(page, QStringLiteral("document.querySelector('#toast-region').replaceChildren(); document.querySelector('#main-content').scrollTop = 0; window.scrollTo(0, 0); true"));
+        QTest::qWait(200);
+        QVERIFY(window.grab().save(capturePath + ".downloads.png"));
+        evaluate(page, QStringLiteral("document.querySelector('[data-page=settings]').click(); true"));
+        QTest::qWait(100);
+        QVERIFY(window.grab().save(capturePath + ".download-settings.png"));
+    }
+}
+
+void WebSmokeTest::damagedDownloadHistoryIsIsolated()
+{
+    QTemporaryDir data;
+    QVERIFY(data.isValid());
+    QFile history(data.filePath(QStringLiteral("download-tasks.v1.json")));
+    QVERIFY(history.open(QIODevice::WriteOnly));
+    history.write("{broken");
+    history.close();
+    WebWindow window(data.path(), false);
+    window.show();
+    auto* page = window.webView()->page();
+    QTRY_VERIFY_WITH_TIMEOUT(evaluate(page, QStringLiteral("document.documentElement.dataset.ready === 'true'")).toBool(), 20000);
+    QVERIFY(evaluate(page, QStringLiteral("!document.querySelector('#workspace').inert && document.querySelector('#connection-error').hidden")).toBool());
+    evaluate(page, QStringLiteral("document.querySelector('[data-page=downloads]').click(); true"));
+    QVERIFY(evaluate(page, QStringLiteral("!document.querySelector('#download-list-error').hidden && document.querySelector('#download-list-error').textContent.length > 0")).toBool());
+    evaluate(page, QStringLiteral("document.querySelector('[data-page=shortcuts]').click(); true"));
+    QVERIFY(evaluate(page, QStringLiteral("!document.querySelector('#page-shortcuts').hidden")).toBool());
+    QVERIFY(history.open(QIODevice::ReadOnly));
+    QCOMPARE(history.readAll(), QByteArray("{broken"));
+}
+
 // 初始化测试用 Qt 应用；不会启用托盘、系统热键或单实例服务。
 int main(int argc, char** argv)
 {
     QApplication app(argc, argv);
     app.setApplicationName(QStringLiteral("DesktopToolWebTest"));
-    app.setApplicationVersion(QStringLiteral("2.0.0-test"));
+    app.setApplicationVersion(QStringLiteral("2.1.0-test"));
     WebSmokeTest test;
     return QTest::qExec(&test, argc, argv);
 }

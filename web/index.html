@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="styles.css">
   <script defer src="qrc:///qtwebchannel/qwebchannel.js"></script>
   <script defer src="bridge.js"></script>
+  <script defer src="downloads.js"></script>
   <script defer src="app.js"></script>
 </head>
 <body>
@@ -18,6 +19,7 @@
       <nav class="main-nav">
         <button class="nav-button active" data-page="shortcuts" aria-current="page"><span aria-hidden="true">↗</span>快捷方式<span class="nav-count" id="shortcut-count">0</span></button>
         <button class="nav-button" data-page="notes"><span aria-hidden="true">▤</span>便签<span class="nav-count" id="note-count">0</span></button>
+        <button class="nav-button" data-page="downloads"><span aria-hidden="true">↓</span>下载<span class="nav-count" id="download-count">0</span></button>
         <button class="nav-button" data-page="settings"><span aria-hidden="true">⚙</span>设置</button>
       </nav>
       <div class="sidebar-bottom"><span class="status-dot" id="connection-dot"></span><span id="connection-status">正在连接桌面程序…</span><span class="version" id="app-version"></span></div>
@@ -56,14 +58,29 @@
             </div>
           </div>
         </section>
+        <section class="page downloads-page" id="page-downloads" aria-labelledby="downloads-heading" hidden>
+          <header class="page-header"><div><div class="eyebrow">DOWNLOAD MANAGER</div><h1 id="downloads-heading">下载</h1><p>集中管理下载任务，随时暂停与继续。</p></div><span class="download-active-badge"><span class="status-dot" aria-hidden="true"></span><span id="download-active-count">0 个任务进行中</span></span></header>
+          <form id="download-form" class="download-form">
+            <label class="form-field" for="download-url"><span>下载链接</span><div class="download-link-row"><input id="download-url" name="download-url" type="url" required placeholder="粘贴 http:// 或 https:// 下载链接" autocomplete="off" spellcheck="false"><button id="add-download" type="submit" class="button primary">↓ 创建下载</button></div></label>
+            <label class="form-field" for="download-directory"><span>保存到 <small>可选</small></span><div class="input-with-button"><input id="download-directory" name="download-directory" type="text" placeholder="留空使用默认下载目录" autocomplete="off" spellcheck="false"><button id="choose-download-directory" type="button" class="button secondary">选择目录…</button><button id="use-default-download-directory" type="button" class="button quiet">使用默认</button></div></label>
+            <div class="download-directory-help"><p id="download-default-hint" class="field-help">默认下载目录正在读取…</p><p class="field-help">留空或目录无效时，将使用设置中的默认下载目录。</p></div>
+            <p id="download-create-error" class="field-error" role="alert" hidden></p>
+          </form>
+          <div class="download-list-heading"><h2>下载任务</h2><span id="download-summary" class="muted">暂无下载任务</span></div>
+          <div id="download-list-error" class="notice warning" role="alert" hidden></div>
+          <div id="download-list" class="download-list" aria-label="下载任务列表"></div>
+          <div id="download-empty" class="empty-state"><div class="empty-icon" aria-hidden="true">↓</div><h2>开始你的第一个下载</h2><p>在上方粘贴链接，文件将保存到你选择的目录。</p></div>
+          <p class="download-background-hint">隐藏到托盘后，下载会继续进行；退出程序时会保留任务，便于下次继续。</p>
+        </section>
         <section class="page settings-page" id="page-settings" aria-labelledby="settings-heading" hidden>
           <header class="page-header"><div><div class="eyebrow">PREFERENCES</div><h1 id="settings-heading">设置</h1><p>调整适合自己的工作方式。</p></div></header>
           <form id="settings-form" class="settings-card">
             <div class="settings-section"><h2>界面</h2><div class="setting-row"><div><label for="font-size">字体大小</label><p>应用于列表和便签内容，单位为像素。</p></div><div class="number-control"><input id="font-size" type="number" min="8" max="32" value="16" required><span>px</span></div></div></div>
             <div class="settings-section"><h2>快捷键</h2><div class="setting-row"><div><label for="hotkey-input">唤起桌面工具</label><p>点击输入框后，按下需要的按键组合。</p></div><input id="hotkey-input" class="hotkey-input" type="text" readonly value="F8" aria-describedby="hotkey-help"></div><p class="field-help" id="hotkey-help">支持 Ctrl、Alt、Shift、Win 和功能键；按 Tab 可离开输入框。</p><div id="hotkey-warning" class="notice warning" hidden></div></div>
+            <div class="settings-section"><h2>下载</h2><label class="form-field settings-directory" for="download-default-directory"><span>默认下载目录</span><div class="input-with-button"><input id="download-default-directory" type="text" placeholder="选择默认下载目录" autocomplete="off" spellcheck="false"><button id="choose-default-download-directory" type="button" class="button secondary">选择目录…</button></div></label><p class="field-help">创建任务未指定有效目录时，文件将保存到这里。修改后点击“保存设置”生效。</p></div>
             <div class="settings-actions"><button type="submit" class="button primary">保存设置</button><button id="reset-settings" type="button" class="button secondary">恢复默认</button><span id="settings-save-state" class="muted" role="status"></span></div>
           </form>
-          <div class="settings-card data-card"><h2>本地数据</h2><p class="muted">快捷方式、便签和设置保存在此设备。</p><code id="data-path" class="data-path">正在读取…</code><button id="open-data-directory" class="button secondary">打开数据目录 ↗</button></div>
+          <div class="settings-card data-card"><h2>本地数据</h2><p class="muted">快捷方式、便签、设置和下载记录保存在此设备。下载文件保存在各任务指定的目录。</p><code id="data-path" class="data-path">正在读取…</code><button id="open-data-directory" class="button secondary">打开数据目录 ↗</button></div>
         </section>
       </div>
     </main>

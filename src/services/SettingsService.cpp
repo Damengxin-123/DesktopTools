@@ -7,6 +7,8 @@
 #include <QJsonDocument>
 #include <QJsonParseError>
 #include <QSaveFile>
+#include <QStandardPaths>
+#include <QTemporaryFile>
 
 #include <cmath>
 
@@ -19,6 +21,35 @@ bool integerValue(const QVariant& value, int minimum, int maximum)
     const double result = number.toDouble();
     return number.isDouble() && std::isfinite(result) && std::floor(result) == result
         && result >= minimum && result <= maximum;
+}
+
+// 获取系统下载目录；系统未提供位置时回退到用户主目录中的 Downloads。
+QString defaultDownloadDirectory()
+{
+    QString path = QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);
+    if (path.isEmpty())
+        path = QDir::home().filePath(QStringLiteral("Downloads"));
+    return QDir::cleanPath(QDir::fromNativeSeparators(path));
+}
+
+// 校验下载目录，只允许为系统默认位置创建缺失目录。
+QString checkDownloadDirectory(const QString& path)
+{
+    const QString defaultPath = defaultDownloadDirectory();
+#ifdef Q_OS_WIN
+    const bool isDefault = path.compare(defaultPath, Qt::CaseInsensitive) == 0;
+#else
+    const bool isDefault = path == defaultPath;
+#endif
+    if (!QFileInfo::exists(path) && isDefault && !QDir().mkpath(path))
+        return QStringLiteral("无法创建系统默认下载目录，请选择其他现有目录。");
+    const QFileInfo directory(path);
+    if (!directory.exists() || !directory.isDir())
+        return QStringLiteral("下载目录不存在或不是文件夹，请选择一个现有目录。");
+    QTemporaryFile probe(QDir(path).filePath(QStringLiteral(".desktoptool-write-test-XXXXXX")));
+    if (!probe.open() || probe.write("1", 1) != 1 || !probe.flush())
+        return QStringLiteral("下载目录无法写入，请检查权限或选择其他目录。");
+    return {};
 }
 }
 
@@ -42,7 +73,8 @@ SettingsService::SettingsService(const QString& dataRoot, QObject* parent)
         return;
     }
     m_document = document.object();
-    const QVariantMap result = validate(data());
+    // 路径所在磁盘暂时离线时仍允许打开设置并修改目录。
+    const QVariantMap result = validateValues(data(), false);
     if (!result.value(QStringLiteral("ok")).toBool())
         m_loadError = QStringLiteral("设置文件内容无效，已禁止覆盖：%1").arg(result.value(QStringLiteral("error")).toString());
 }
@@ -55,11 +87,18 @@ QVariantMap SettingsService::data() const
         {QStringLiteral("hotkeyModifier"), m_document.contains(QStringLiteral("hotkey_modifier"))
              ? m_document.value(QStringLiteral("hotkey_modifier")).toVariant() : QVariant(0)},
         {QStringLiteral("hotkeyKey"), m_document.contains(QStringLiteral("hotkey_key"))
-             ? m_document.value(QStringLiteral("hotkey_key")).toVariant() : QVariant(0x77)}
+             ? m_document.value(QStringLiteral("hotkey_key")).toVariant() : QVariant(0x77)},
+        {QStringLiteral("downloadDirectory"), m_document.contains(QStringLiteral("download_directory"))
+             ? m_document.value(QStringLiteral("download_directory")).toVariant() : QVariant(defaultDownloadDirectory())}
     };
 }
 
 QVariantMap SettingsService::validate(const QVariantMap& settings)
+{
+    return validateValues(settings, true);
+}
+
+QVariantMap SettingsService::validateValues(const QVariantMap& settings, bool checkDirectory)
 {
     if (!integerValue(settings.value(QStringLiteral("fontSize")), 8, 32))
         return ServiceResult::failure(QStringLiteral("字体大小必须为 8 至 32 的整数。"));
@@ -74,19 +113,35 @@ QVariantMap SettingsService::validate(const QVariantMap& settings)
     for (auto iterator = settings.cbegin(); iterator != settings.cend(); ++iterator)
     {
         if (iterator.key() != QStringLiteral("fontSize") && iterator.key() != QStringLiteral("hotkeyModifier")
-            && iterator.key() != QStringLiteral("hotkeyKey"))
+            && iterator.key() != QStringLiteral("hotkeyKey") && iterator.key() != QStringLiteral("downloadDirectory"))
             return ServiceResult::failure(QStringLiteral("未知的设置字段：%1").arg(iterator.key()));
+    }
+    if (settings.contains(QStringLiteral("downloadDirectory"))
+        && !QJsonValue::fromVariant(settings.value(QStringLiteral("downloadDirectory"))).isString())
+        return ServiceResult::failure(QStringLiteral("下载目录必须是文件夹路径。"));
+    QString directory = settings.value(QStringLiteral("downloadDirectory")).toString().trimmed();
+    if (directory.isEmpty())
+        directory = defaultDownloadDirectory();
+    directory = QDir::fromNativeSeparators(directory);
+    if (!QDir::isAbsolutePath(directory) || directory.contains(QChar::Null))
+        return ServiceResult::failure(QStringLiteral("下载目录必须是有效的绝对路径，请使用目录选择按钮。"));
+    directory = QDir::cleanPath(directory);
+    if (checkDirectory) {
+        const QString directoryError = checkDownloadDirectory(directory);
+        if (!directoryError.isEmpty())
+            return ServiceResult::failure(directoryError);
     }
     return ServiceResult::success(QVariantMap{
         {QStringLiteral("fontSize"), settings.value(QStringLiteral("fontSize")).toInt()},
         {QStringLiteral("hotkeyModifier"), settings.value(QStringLiteral("hotkeyModifier")).toInt()},
-        {QStringLiteral("hotkeyKey"), key}
+        {QStringLiteral("hotkeyKey"), key},
+        {QStringLiteral("downloadDirectory"), directory}
     });
 }
 
 QVariantMap SettingsService::snapshot() const
 {
-    return m_loadError.isEmpty() ? ServiceResult::success(data()) : ServiceResult::failure(m_loadError);
+    return m_loadError.isEmpty() ? validateValues(data(), false) : ServiceResult::failure(m_loadError);
 }
 
 QVariantMap SettingsService::save(const QVariantMap& settings)
@@ -104,6 +159,7 @@ QVariantMap SettingsService::save(const QVariantMap& settings)
     document.insert(QStringLiteral("tree_view_font_size"), candidate.value(QStringLiteral("fontSize")).toInt());
     document.insert(QStringLiteral("hotkey_modifier"), candidate.value(QStringLiteral("hotkeyModifier")).toInt());
     document.insert(QStringLiteral("hotkey_key"), candidate.value(QStringLiteral("hotkeyKey")).toInt());
+    document.insert(QStringLiteral("download_directory"), candidate.value(QStringLiteral("downloadDirectory")).toString());
     if (!QDir().mkpath(QFileInfo(m_path).absolutePath()))
         return ServiceResult::failure(QStringLiteral("无法创建设置目录。"));
     QSaveFile file(m_path);

@@ -100,14 +100,17 @@ void WebWindow::requestQuit()
     activate();
     QPointer<WebWindow> self(this);
     m_view->page()->runJavaScript(QStringLiteral(
-        "typeof window.desktopToolCanClose === 'function' ? window.desktopToolCanClose() : true"),
+        "typeof window.desktopToolCanClose === 'function' ? window.desktopToolCanClose() : null"),
         [self](const QVariant& allowed) {
             if (!self)
                 return;
             self->m_quitPending = false;
             if (!allowed.isValid() || allowed.metaType().id() != QMetaType::Bool) {
+                const QString detail = self->m_bridge->hasActiveDownloads()
+                    ? QStringLiteral("页面没有响应，无法确认未保存内容。正在进行的下载会暂停，可在下次启动后继续。仍要退出吗？")
+                    : QStringLiteral("页面没有响应，无法确认是否有未保存内容。仍要退出吗？");
                 if (QMessageBox::warning(self, QStringLiteral("退出桌面小工具"),
-                        QStringLiteral("页面没有响应，无法确认是否有未保存的便签。仍要退出吗？"),
+                        detail,
                         QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
                     return;
             } else if (!allowed.toBool()) {

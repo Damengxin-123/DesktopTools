@@ -19,7 +19,7 @@
     noteLoadVersion: 0, // 忽略已过期的便签加载结果。
     shortcutLoadVersion: 0, // 忽略已过期的快捷方式列表结果。
     notesLoadVersion: 0, // 忽略已过期的便签目录结果。
-    settings: { fontSize: 16, hotkeyModifier: 0, hotkeyKey: 119 }, // 最近保存的设置。
+    settings: { fontSize: 16, hotkeyModifier: 0, hotkeyKey: 119, downloadDirectory: "" }, // 最近保存的界面、热键和默认下载路径。
     hotkeyDraft: { modifier: 0, key: 119 }, // 正在输入的热键。
     settingsDirty: false, // 设置表单是否已修改。
     settingsSaving: false, // 设置提交期间不以信号覆盖表单。
@@ -27,6 +27,7 @@
     drag: null, // 本页面内部拖动的条目及类型。
     connected: false, // 是否已完成后端初始加载。
     signalTimers: new Map(), // 合并短时间内的同类后端变更通知。
+    busyTimer: null, // 延迟显示全局等待提示，避免快速进度查询造成闪烁。
     dialog: null // 当前对话框提交函数及忙碌状态。
   };
 
@@ -535,6 +536,12 @@
     return !state.noteDirty || window.confirm("当前便签有未保存的修改。确定放弃这些修改吗？");
   }
 
+  // 离开设置或退出前保留修改确认，取消时不改变下载目录等草稿字段。
+  function canLeaveSettings() {
+    if (state.settingsSaving) { toast("设置正在保存，请稍候。", "warning"); return false; }
+    return !state.settingsDirty || window.confirm("设置中有未保存的修改。确定放弃这些修改吗？");
+  }
+
   // 清空编辑器，同时使尚在等待的加载请求失效。
   function clearNoteEditor() {
     ++state.noteLoadVersion;
@@ -546,18 +553,25 @@
 
   // 切换侧栏页面，未保存便签必须先确认。
   function navigate(page) {
-    if (page === state.page || !["shortcuts", "notes", "settings"].includes(page)) return;
+    if (page === state.page || !["shortcuts", "notes", "downloads", "settings"].includes(page)) return;
     if (state.page === "notes") {
       if (!canLeaveNote()) return;
       if (state.noteDirty) clearNoteEditor();
     }
+    if (state.page === "settings") {
+      if (!canLeaveSettings()) return;
+      if (state.settingsDirty) applySettings(state.settings);
+    }
     state.page = page;
-    for (const name of ["shortcuts", "notes", "settings"]) byId("page-" + name).hidden = name !== page;
+    for (const name of ["shortcuts", "notes", "downloads", "settings"]) byId("page-" + name).hidden = name !== page;
     document.querySelectorAll(".nav-button").forEach(function updateNavigation(node) {
       const active = node.dataset.page === page;
       node.classList.toggle("active", active);
       if (active) node.setAttribute("aria-current", "page"); else node.removeAttribute("aria-current");
     });
+    // 新页面从顶部开始，兼容文档滚动与独立主内容滚动容器。
+    byId("main-content").scrollTop = 0;
+    window.scrollTo({ top: 0, left: 0, behavior: "instant" });
   }
 
   // 允许保留的富文本标签；危险元素连同内容一起移除。
@@ -875,6 +889,8 @@
     state.hotkeyDraft = { modifier: Number(settings.hotkeyModifier), key: Number(settings.hotkeyKey) };
     byId("font-size").value = String(settings.fontSize);
     byId("hotkey-input").value = hotkeyName(state.hotkeyDraft.modifier, state.hotkeyDraft.key);
+    byId("download-default-directory").value = String(settings.downloadDirectory || "");
+    window.desktopDownloads.setDefaultDirectory(settings.downloadDirectory);
     byId("settings-save-state").textContent = "";
     byId("settings-save-state").classList.remove("dirty");
     previewFont();
@@ -899,7 +915,12 @@
     state.settingsSaving = true;
     byId("settings-form").inert = true;
     try {
-      const settings = await window.desktopBridge.call("saveSettings", { fontSize, hotkeyModifier: state.hotkeyDraft.modifier, hotkeyKey: state.hotkeyDraft.key });
+      const settings = await window.desktopBridge.call("saveSettings", {
+        fontSize, // 列表与便签的字号。
+        hotkeyModifier: state.hotkeyDraft.modifier, // Windows 热键修饰键组合。
+        hotkeyKey: state.hotkeyDraft.key, // Windows 主键虚拟码。
+        downloadDirectory: byId("download-default-directory").value.trim() // 用户提交的默认下载目录。
+      });
       applySettings(settings);
       byId("settings-save-state").textContent = "已保存";
       await refreshAppInfo();
@@ -911,7 +932,7 @@
   function resetSettings() {
     if (state.settingsSaving) return;
     const body = element("div");
-    body.append(element("p", "dialog-description", "恢复为 16 px 字体和 F8 唤起快捷键？\n快捷方式和便签内容不会改变。"));
+    body.append(element("p", "dialog-description", "恢复为 16 px 字体、F8 唤起快捷键和系统默认下载目录？\n已有快捷方式、便签和下载文件不会改变。"));
     showDialog("恢复默认设置", body, async function confirmResetSettings() {
       state.settingsSaving = true;
       try {
@@ -937,12 +958,16 @@
     byId("retry-connection").disabled = true;
     try {
       await window.desktopBridge.connect();
-      await Promise.all([refreshShortcuts(), refreshNotes(), window.desktopBridge.call("getSettings").then(applySettings), refreshAppInfo()]);
+      await Promise.all([refreshShortcuts(), refreshNotes(), window.desktopBridge.call("getSettings").then(applySettings), refreshAppInfo(), window.desktopDownloads.initialize({ toast, reportError })]);
       if (!state.connected) {
         await window.desktopBridge.on("shortcutsChanged", function shortcutsChanged() { scheduleRefresh("shortcuts", refreshShortcuts); });
         await window.desktopBridge.on("notesChanged", function notesChanged() { scheduleRefresh("notes", refreshNotes); });
         await window.desktopBridge.on("settingsChanged", function settingsChanged() {
-          if (!state.settingsDirty && !state.settingsSaving) scheduleRefresh("settings", async function reloadSettings() { applySettings(await window.desktopBridge.call("getSettings")); await refreshAppInfo(); });
+          if (!state.settingsDirty && !state.settingsSaving) scheduleRefresh("settings", async function reloadSettings() {
+            const settings = await window.desktopBridge.call("getSettings");
+            if (!state.settingsDirty && !state.settingsSaving) applySettings(settings);
+            await refreshAppInfo();
+          });
         });
       }
       state.connected = true;
@@ -968,7 +993,17 @@
 
   // 页面生命周期和固定控件只绑定一次。
   function installEvents() {
-    document.addEventListener("desktop-busy", function busyChanged(event) { byId("busy-indicator").hidden = !event.detail; });
+    document.addEventListener("desktop-busy", function busyChanged(event) {
+      if (!event.detail) {
+        window.clearTimeout(state.busyTimer); state.busyTimer = null;
+        byId("busy-indicator").hidden = true;
+      } else if (state.busyTimer === null && byId("busy-indicator").hidden) {
+        state.busyTimer = window.setTimeout(function showDelayedBusyState() {
+          state.busyTimer = null;
+          byId("busy-indicator").hidden = false;
+        }, 150);
+      }
+    });
     document.querySelectorAll(".nav-button").forEach(function installNavigation(node) { node.addEventListener("click", function navigationClicked() { navigate(node.dataset.page); }); });
     listen("retry-connection", "click", connectApplication);
     listen("add-shortcut", "click", function newShortcutClicked() { editShortcut(null); });
@@ -1011,6 +1046,7 @@
     listen("note-image-input", "change", async function noteImagesSelected(event) { const files = Array.from(event.target.files); event.target.value = ""; await insertImageFiles(files); });
     listen("hotkey-input", "keydown", captureHotkey);
     listen("font-size", "input", function fontSizeChanged() { previewFont(); markSettingsDirty(); });
+    listen("download-default-directory", "input", markSettingsDirty);
     listen("settings-form", "submit", saveSettings);
     listen("reset-settings", "click", resetSettings);
     listen("open-data-directory", "click", async function openDataDirectory(event) { await perform(function invokeOpenDataDirectory() { return window.desktopBridge.call("openDataDirectory"); }, "已打开数据目录", event.currentTarget); });
@@ -1029,7 +1065,8 @@
   window.desktopToolCanClose = function desktopToolCanClose() {
     if (state.dialog && state.dialog.busy) { toast("正在提交操作，请稍候再关闭。", "warning"); return false; }
     if (state.settingsSaving) { toast("设置正在保存，请稍候再关闭。", "warning"); return false; }
-    return canLeaveNote();
+    if (!canLeaveNote() || !canLeaveSettings()) return false;
+    return window.desktopDownloads.canClose();
   };
 
   installEvents();

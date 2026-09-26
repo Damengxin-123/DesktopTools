@@ -9,6 +9,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QStandardPaths>
 #include <QTemporaryDir>
 
 namespace
@@ -218,9 +219,10 @@ bool settingsCompatibility()
     REQUIRE(resultData(service.snapshot()).value(QStringLiteral("fontSize")).toInt() == 20);
     REQUIRE(resultData(service.snapshot()).value(QStringLiteral("hotkeyModifier")).toInt() == 3);
     REQUIRE(resultData(service.snapshot()).value(QStringLiteral("hotkeyKey")).toInt() == 75);
+    REQUIRE(QDir::isAbsolutePath(resultData(service.snapshot()).value(QStringLiteral("downloadDirectory")).toString()));
     int changes = 0;
     QObject::connect(&service, &SettingsService::changed, [&changes]() { ++changes; });
-    REQUIRE(ok(service.save({{QStringLiteral("fontSize"), 24}})));
+    REQUIRE(ok(service.save({{QStringLiteral("fontSize"), 24}, {QStringLiteral("downloadDirectory"), directory.path()}})));
     REQUIRE(changes == 1);
     const QByteArray beforeFailure = readFile(path);
     REQUIRE(QJsonDocument::fromJson(beforeFailure).object().value(QStringLiteral("custom")).toObject().value(QStringLiteral("keep")).toBool());
@@ -249,6 +251,62 @@ bool settingsCompatibility()
     REQUIRE(readFile(path) == QByteArray("{\"hotkey_key\":16}"));
     return true;
 }
+
+// 验证下载目录默认值、部分更新、写权限探测及离线目录的设置恢复。
+bool downloadDirectorySettings()
+{
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    const QString config = directory.filePath(QStringLiteral("setting/system_config.json"));
+    const QString downloadPath = directory.filePath(QStringLiteral("下载 文件"));
+    REQUIRE(QDir().mkdir(downloadPath));
+    SettingsService service(directory.path());
+    QString expectedDefault = QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);
+    if (expectedDefault.isEmpty())
+        expectedDefault = QDir::home().filePath(QStringLiteral("Downloads"));
+    expectedDefault = QDir::cleanPath(QDir::fromNativeSeparators(expectedDefault));
+    REQUIRE(resultData(service.snapshot()).value(QStringLiteral("downloadDirectory")).toString() == expectedDefault);
+
+    int changes = 0;
+    QObject::connect(&service, &SettingsService::changed, [&changes]() { ++changes; });
+    REQUIRE(ok(service.save({{QStringLiteral("downloadDirectory"), QDir::toNativeSeparators(downloadPath)}})));
+    REQUIRE(changes == 1);
+    REQUIRE(resultData(service.snapshot()).value(QStringLiteral("downloadDirectory")).toString() == downloadPath);
+    REQUIRE(QJsonDocument::fromJson(readFile(config)).object().value(QStringLiteral("download_directory")).toString() == downloadPath);
+    REQUIRE(QDir(downloadPath).entryList(QDir::Files | QDir::Hidden | QDir::NoDotAndDotDot).isEmpty());
+    REQUIRE(ok(service.save({{QStringLiteral("fontSize"), 22}})));
+    REQUIRE(resultData(service.snapshot()).value(QStringLiteral("downloadDirectory")).toString() == downloadPath);
+    REQUIRE(changes == 2);
+
+    const QByteArray original = readFile(config);
+    const QVariantMap originalState = service.snapshot();
+    const QString missing = directory.filePath(QStringLiteral("误写的目录"));
+    REQUIRE(!ok(service.save({{QStringLiteral("downloadDirectory"), QStringLiteral("relative/downloads")}})));
+    REQUIRE(!ok(service.save({{QStringLiteral("downloadDirectory"), missing}})));
+    REQUIRE(!QFileInfo::exists(missing));
+    REQUIRE(!ok(service.save({{QStringLiteral("downloadDirectory"), config}})));
+    REQUIRE(!ok(service.save({{QStringLiteral("downloadDirectory"), 123}})));
+    REQUIRE(!ok(service.save({{QStringLiteral("downloadDirectory"), downloadPath + QChar::Null}})));
+    REQUIRE(service.snapshot() == originalState);
+    REQUIRE(readFile(config) == original);
+    REQUIRE(changes == 2);
+
+    // 模拟已保存目录被移除，仍可进入设置并选择新的有效目录。
+    REQUIRE(QDir().rmdir(downloadPath));
+    SettingsService reopened(directory.path());
+    REQUIRE(ok(reopened.snapshot()));
+    REQUIRE(resultData(reopened.snapshot()).value(QStringLiteral("downloadDirectory")).toString() == downloadPath);
+    REQUIRE(ok(reopened.save({{QStringLiteral("downloadDirectory"), directory.path()}})));
+    REQUIRE(resultData(reopened.snapshot()).value(QStringLiteral("downloadDirectory")).toString() == directory.path());
+
+    // 配置字段类型损坏时保护原文件，而不是把数字静默当成路径。
+    REQUIRE(writeFile(config, QByteArray("{\"download_directory\":123}")));
+    SettingsService invalid(directory.path());
+    REQUIRE(!ok(invalid.snapshot()));
+    REQUIRE(!ok(invalid.save({{QStringLiteral("downloadDirectory"), directory.path()}})));
+    REQUIRE(readFile(config) == QByteArray("{\"download_directory\":123}"));
+    return true;
+}
 }
 
 // 运行不依赖界面与 QtTest 的服务回归测试。
@@ -256,8 +314,8 @@ int main(int argc, char* argv[])
 {
     QCoreApplication application(argc, argv);
     const bool passed = legacyImport() && catalogCrud() && categoryConflict()
-        && damagedCatalog() && writeFailure() && settingsCompatibility();
+        && damagedCatalog() && writeFailure() && settingsCompatibility() && downloadDirectorySettings();
     if (passed)
-        qInfo() << "CatalogServiceTest: all 6 scenarios passed";
+        qInfo() << "CatalogServiceTest: all 7 scenarios passed";
     return passed ? 0 : 1;
 }
