@@ -361,3 +361,17 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+
+# Qt/CMake 本地构建、发布目录和用户数据，不提交到源代码仓库。
+/.codex_build/
+/build/
+/build-*/
+/pack/app/
+/data/
+/CMakeUserPresets.json
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+install_manifest.txt
+CTestTestfile.cmake
+Testing/

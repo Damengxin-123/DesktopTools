@@ -1,0 +1,12 @@
+<RCC>
+  <qresource prefix="/web">
+    <file alias="index.html">../web/index.html</file>
+    <file alias="styles.css">../web/styles.css</file>
+    <file alias="bridge.js">../web/bridge.js</file>
+    <file alias="app.js">../web/app.js</file>
+  </qresource>
+  <qresource prefix="/images">
+    <file alias="app_icon.ico">images/app_icon.ico</file>
+    <file alias="app_icon.png">images/app_icon.png</file>
+  </qresource>
+</RCC>

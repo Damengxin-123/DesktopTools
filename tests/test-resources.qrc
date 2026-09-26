@@ -1,0 +1,5 @@
+<RCC>
+  <qresource prefix="/tests">
+    <file>web-smoke.js</file>
+  </qresource>
+</RCC>

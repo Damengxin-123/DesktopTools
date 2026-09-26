@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' qrc:; style-src 'self' 'unsafe-inline'; img-src data: qrc:; font-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>桌面工具</title>
+  <link rel="stylesheet" href="styles.css">
+  <script defer src="qrc:///qtwebchannel/qwebchannel.js"></script>
+  <script defer src="bridge.js"></script>
+  <script defer src="app.js"></script>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="主导航">
+      <div class="brand"><span class="brand-mark" aria-hidden="true">⌘</span><div><strong>桌面工具</strong><span>让日常井然有序</span></div></div>
+      <div class="nav-label">工作空间</div>
+      <nav class="main-nav">
+        <button class="nav-button active" data-page="shortcuts" aria-current="page"><span aria-hidden="true">↗</span>快捷方式<span class="nav-count" id="shortcut-count">0</span></button>
+        <button class="nav-button" data-page="notes"><span aria-hidden="true">▤</span>便签<span class="nav-count" id="note-count">0</span></button>
+        <button class="nav-button" data-page="settings"><span aria-hidden="true">⚙</span>设置</button>
+      </nav>
+      <div class="sidebar-bottom"><span class="status-dot" id="connection-dot"></span><span id="connection-status">正在连接桌面程序…</span><span class="version" id="app-version"></span></div>
+    </aside>
+    <main id="main-content" class="main-content">
+      <div id="connection-error" class="connection-error" role="alert" hidden><strong>请从桌面程序打开</strong><p>此页面需要连接 Qt 后端。请启动桌面工具程序，以使用文件、便签和系统设置功能。</p><button id="retry-connection" class="button secondary">重新连接</button></div>
+      <div class="workspace" id="workspace" inert>
+        <section class="page" id="page-shortcuts" aria-labelledby="shortcuts-heading">
+          <header class="page-header"><div><div class="eyebrow">QUICK ACCESS</div><h1 id="shortcuts-heading">快捷方式</h1><p>常用文件、目录和网站，一处直达。</p></div><button id="add-shortcut" class="button primary"><span aria-hidden="true">＋</span>添加快捷方式</button></header>
+          <div class="notice-list" id="shortcut-warnings"></div>
+          <div class="section-toolbar"><label class="search-field"><span aria-hidden="true">⌕</span><input id="shortcut-search" type="search" placeholder="搜索名称或地址…" aria-label="搜索快捷方式"></label><button id="add-shortcut-category" class="button secondary">＋ 新建分类</button></div>
+          <div class="category-bar" id="shortcut-categories" aria-label="快捷方式分类"></div>
+          <div class="selection-toolbar"><label class="check-label"><input id="shortcut-select-all" type="checkbox">全选当前结果</label><span id="shortcut-selection-info" class="muted">0 个快捷方式</span><button id="delete-selected-shortcuts" class="button danger quiet" disabled>删除已选</button></div>
+          <div id="shortcut-list" class="shortcut-grid"></div>
+        </section>
+        <section class="page" id="page-notes" aria-labelledby="notes-heading" hidden>
+          <header class="page-header"><div><div class="eyebrow">YOUR NOTES</div><h1 id="notes-heading">便签</h1><p>记录想法，也留住重要细节。</p></div><button id="add-note" class="button primary"><span aria-hidden="true">＋</span>新建便签</button></header>
+          <div class="notice-list" id="note-warnings"></div>
+          <div class="section-toolbar"><label class="search-field"><span aria-hidden="true">⌕</span><input id="note-search" type="search" placeholder="搜索便签标题…" aria-label="搜索便签"></label><button id="add-note-category" class="button secondary">＋ 新建分类</button></div>
+          <div class="category-bar" id="note-categories" aria-label="便签分类"></div>
+          <div class="notes-layout">
+            <div class="note-browser"><div class="selection-toolbar compact"><label class="check-label"><input id="note-select-all" type="checkbox">全选</label><span id="note-selection-info" class="muted">0 篇</span><button id="delete-selected-notes" class="button danger quiet" disabled>删除已选</button></div><div id="note-list" class="note-list"></div></div>
+            <div class="editor-panel">
+              <div id="editor-empty" class="empty-state"><div class="empty-icon" aria-hidden="true">▤</div><h2>给想法留一个位置</h2><p>选择一篇便签，或新建一篇开始记录。</p><button id="empty-add-note" class="button secondary">新建便签</button></div>
+              <div id="note-editor-wrap" hidden>
+                <div class="editor-heading"><label class="sr-only" for="note-title">便签标题</label><input id="note-title" class="note-title" type="text" maxlength="200" placeholder="便签标题"><div class="editor-meta"><label class="sr-only" for="note-category">便签分类</label><select id="note-category" aria-label="便签分类"></select><span id="note-save-state" class="muted" role="status">未保存</span><button id="save-note" class="button primary small">保存</button><button id="delete-current-note" class="button danger quiet small">删除</button></div></div>
+                <div id="editor-toolbar" class="editor-toolbar" role="toolbar" aria-label="文本格式">
+                  <button type="button" data-command="bold" title="粗体（Ctrl+B）" aria-label="粗体"><strong>B</strong></button><button type="button" data-command="italic" title="斜体（Ctrl+I）" aria-label="斜体"><em>I</em></button><button type="button" data-command="underline" title="下划线（Ctrl+U）" aria-label="下划线"><u>U</u></button><button type="button" data-command="strikeThrough" title="删除线" aria-label="删除线"><s>S</s></button><span class="toolbar-separator"></span>
+                  <button type="button" data-command="insertUnorderedList" title="无序列表" aria-label="无序列表">• ≡</button><button type="button" data-command="insertOrderedList" title="有序列表" aria-label="有序列表">1 ≡</button><button type="button" data-command="formatBlock" data-value="h2" title="二级标题">H2</button><button type="button" data-command="formatBlock" data-value="p" title="正文">正文</button><span class="toolbar-separator"></span>
+                  <button type="button" data-command="undo" title="撤销（Ctrl+Z）" aria-label="撤销">↶</button><button type="button" data-command="redo" title="重做（Ctrl+Y）" aria-label="重做">↷</button><button type="button" data-command="removeFormat" title="清除文字格式">清除格式</button><button id="insert-note-image" type="button" title="插入图片">▧ 图片</button>
+                </div>
+                <div id="note-editor" class="note-editor" contenteditable="true" role="textbox" aria-label="便签内容" aria-multiline="true" data-placeholder="从这里开始记录…" spellcheck="false"></div>
+                <footer class="editor-footer"><span>支持粘贴图片 · Ctrl+S 保存</span><span id="note-character-count">0 字</span></footer>
+                <input id="note-image-input" type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden>
+              </div>
+            </div>
+          </div>
+        </section>
+        <section class="page settings-page" id="page-settings" aria-labelledby="settings-heading" hidden>
+          <header class="page-header"><div><div class="eyebrow">PREFERENCES</div><h1 id="settings-heading">设置</h1><p>调整适合自己的工作方式。</p></div></header>
+          <form id="settings-form" class="settings-card">
+            <div class="settings-section"><h2>界面</h2><div class="setting-row"><div><label for="font-size">字体大小</label><p>应用于列表和便签内容，单位为像素。</p></div><div class="number-control"><input id="font-size" type="number" min="8" max="32" value="16" required><span>px</span></div></div></div>
+            <div class="settings-section"><h2>快捷键</h2><div class="setting-row"><div><label for="hotkey-input">唤起桌面工具</label><p>点击输入框后，按下需要的按键组合。</p></div><input id="hotkey-input" class="hotkey-input" type="text" readonly value="F8" aria-describedby="hotkey-help"></div><p class="field-help" id="hotkey-help">支持 Ctrl、Alt、Shift、Win 和功能键；按 Tab 可离开输入框。</p><div id="hotkey-warning" class="notice warning" hidden></div></div>
+            <div class="settings-actions"><button type="submit" class="button primary">保存设置</button><button id="reset-settings" type="button" class="button secondary">恢复默认</button><span id="settings-save-state" class="muted" role="status"></span></div>
+          </form>
+          <div class="settings-card data-card"><h2>本地数据</h2><p class="muted">快捷方式、便签和设置保存在此设备。</p><code id="data-path" class="data-path">正在读取…</code><button id="open-data-directory" class="button secondary">打开数据目录 ↗</button></div>
+        </section>
+      </div>
+    </main>
+  </div>
+  <div id="busy-indicator" class="busy-indicator" role="status" hidden><span class="spinner"></span>正在处理…</div>
+  <div id="toast-region" class="toast-region" role="status" aria-live="polite" aria-atomic="true"></div>
+  <dialog id="app-dialog" class="app-dialog"><form id="dialog-form"><div class="dialog-heading"><h2 id="dialog-title"></h2><button id="dialog-close" type="button" class="icon-button" aria-label="关闭">×</button></div><div id="dialog-body"></div><p id="dialog-error" class="field-error" role="alert" hidden></p><div class="dialog-actions"><button id="dialog-cancel" type="button" class="button secondary">取消</button><button id="dialog-submit" type="submit" class="button primary">保存</button></div></form></dialog>
+</body>
+</html>
