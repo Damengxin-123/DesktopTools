@@ -27,6 +27,16 @@ namespace {
 constexpr qint64 TransferBufferSize = 128 * 1024;
 /** 任务索引的读取大小上限，拒绝异常巨大或损坏的历史文件。 */
 constexpr qint64 MaximumIndexBytes = 16 * 1024 * 1024;
+/** 单轮下载最多自动恢复三次，防止反复断开时无限发起请求。 */
+constexpr int MaximumRetryAttempts = 3;
+
+/** 只有连接超时或暂时中断可以自动重试，协议与文件校验错误保持失败。 */
+bool isTransientNetworkError(QNetworkReply::NetworkError error)
+{
+    return error == QNetworkReply::TimeoutError || error == QNetworkReply::RemoteHostClosedError
+        || error == QNetworkReply::TemporaryNetworkFailureError || error == QNetworkReply::NetworkSessionFailedError
+        || error == QNetworkReply::ProxyConnectionClosedError || error == QNetworkReply::ProxyTimeoutError;
+}
 
 /** 使用平台合适的大小写规则比较本地路径。 */
 bool samePath(const QString& first, const QString& second)
@@ -87,7 +97,6 @@ DownloadService::DownloadService(const QString& dataRoot, QObject* parent)
     : QObject(parent)
     , m_dataRoot(QDir::cleanPath(QFileInfo(dataRoot).absoluteFilePath()))
     , m_indexPath(QDir(m_dataRoot).filePath(QStringLiteral("download-tasks.v1.json")))
-    , m_network(new QNetworkAccessManager(this))
     , m_notifyTimer(new QTimer(this))
     , m_checkpointTimer(new QTimer(this))
 {
@@ -432,6 +441,8 @@ bool DownloadService::start(const TaskPtr& task, QString& error)
         task->status = QStringLiteral("paused");
         return false;
     }
+    // 每轮传输使用独立连接池；重试不会继续排队在已经超时的共享连接上。
+    task->network = new QNetworkAccessManager(this);
     request(task, task->url);
     emit changed();
     return true;
@@ -453,7 +464,7 @@ void DownloadService::request(const TaskPtr& task, const QUrl& url)
         request.setRawHeader("Range", "bytes=" + QByteArray::number(task->requestOffset) + '-');
         request.setRawHeader("If-Range", task->etag.isEmpty() ? task->lastModified : task->etag);
     }
-    QNetworkReply* reply = m_network->get(request);
+    QNetworkReply* reply = task->network->get(request);
     reply->setReadBufferSize(TransferBufferSize * 2);
     task->reply = reply;
     connect(reply, &QNetworkReply::metaDataChanged, this, [this, task, reply] {
@@ -650,7 +661,11 @@ void DownloadService::finish(const TaskPtr& task)
     if (task->reply != reply)
         return;
     if (reply->error() != QNetworkReply::NoError) {
-        fail(task, QStringLiteral("网络下载失败：") + reply->errorString());
+        if (isTransientNetworkError(reply->error()) && scheduleRetry(task))
+            return;
+        const QString attempts = task->retryAttempts > 0
+            ? QStringLiteral("（已自动重试 %1 次）").arg(task->retryAttempts) : QString();
+        fail(task, QStringLiteral("网络下载失败") + attempts + QStringLiteral("：") + reply->errorString());
         return;
     }
     if (!task->headersAccepted || (task->expectedBytes >= 0 && task->responseBytes != task->expectedBytes)
@@ -675,8 +690,42 @@ void DownloadService::finish(const TaskPtr& task)
     publishState();
 }
 
+bool DownloadService::scheduleRetry(const TaskPtr& task)
+{
+    if (task->retryAttempts >= MaximumRetryAttempts)
+        return false;
+    // 关闭旧请求并刷新部分文件，后续统一经 start 校验目录和断点标识。
+    stop(task);
+    const int delaySeconds = 1 << task->retryAttempts;
+    ++task->retryAttempts;
+    task->warning = QStringLiteral("网络连接暂时中断，%1 秒后自动重试（%2/%3），已保留下载进度。")
+        .arg(delaySeconds).arg(task->retryAttempts).arg(MaximumRetryAttempts);
+    auto* timer = new QTimer(this);
+    timer->setSingleShot(true);
+    task->retryTimer = timer;
+    connect(timer, &QTimer::timeout, this, [this, task, timer] {
+        // 暂停、取消、移除和销毁均会清除此指针，旧回调不得重新启动任务。
+        if (task->retryTimer != timer || task->status != QStringLiteral("downloading"))
+            return;
+        task->retryTimer.clear();
+        timer->deleteLater();
+        task->warning = QStringLiteral("网络中断后已自动重试 %1 次。").arg(task->retryAttempts);
+        QString error;
+        if (!start(task, error))
+            fail(task, error);
+    });
+    timer->start(delaySeconds * 1000);
+    publishState();
+    return true;
+}
+
 void DownloadService::stop(const TaskPtr& task)
 {
+    if (task->retryTimer) {
+        task->retryTimer->stop();
+        task->retryTimer->deleteLater();
+        task->retryTimer.clear();
+    }
     QNetworkReply* reply = task->reply;
     task->reply.clear();
     if (reply) {
@@ -684,6 +733,10 @@ void DownloadService::stop(const TaskPtr& task)
         if (!reply->isFinished())
             reply->abort();
         reply->deleteLater();
+    }
+    if (task->network) {
+        task->network->deleteLater();
+        task->network.clear();
     }
     if (task->file) {
         task->file->flush();
@@ -728,6 +781,7 @@ QVariantMap DownloadService::resumeTask(const QString& id)
     const auto task = m_tasks.value(id);
     if (!task || (task->status != QStringLiteral("paused") && task->status != QStringLiteral("failed")))
         return ServiceResult::failure(QStringLiteral("只有暂停或失败的任务可以继续。"));
+    task->retryAttempts = 0;
     QString error;
     if (!start(task, error)) {
         fail(task, error);
