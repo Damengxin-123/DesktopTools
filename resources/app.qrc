@@ -11,5 +11,6 @@
   <qresource prefix="/images">
     <file alias="app_icon.ico">images/app_icon.ico</file>
     <file alias="app_icon.png">images/app_icon.png</file>
+    <file alias="github-avatar.jpg">images/github-avatar.jpg</file>
   </qresource>
 </RCC>

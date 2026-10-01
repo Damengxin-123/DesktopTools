@@ -152,8 +152,8 @@ void WebSmokeTest::htmlAndBackend()
         evaluate(page, QStringLiteral("document.querySelector('[data-page=notes]').click(); document.querySelector('.note-row-title').click(); true"));
         QTest::qWait(200);
         QVERIFY(window.grab().save(capturePath + ".notes.png"));
-        evaluate(page, QStringLiteral("document.querySelector('[data-page=settings]').click(); true"));
-        QTest::qWait(100);
+        evaluate(page, QStringLiteral("document.querySelector('[data-page=settings]').click(); document.querySelector('.about-card').scrollIntoView(); true"));
+        QTest::qWait(200);
         QVERIFY(window.grab().save(capturePath + ".settings.png"));
     }
 }

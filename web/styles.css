@@ -129,6 +129,13 @@
 @media(max-width:900px){.emoji-grid{grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}}
 @media(max-width:900px){.clipboard-search-row{flex-wrap:wrap}.clipboard-search-row .search-field{flex-basis:100%}.clipboard-grid{grid-template-columns:1fr}.clipboard-card-heading time{font-size:10px}}
 .settings-directory .input-with-button{max-width:100%}
+.about-card .about-profile{display:flex;align-items:center;gap:16px;margin-bottom:18px}
+.about-avatar{width:64px;height:64px;border-radius:50%;object-fit:cover;border:2px solid #e3e9f4;flex-shrink:0;background:#f5f7fb}
+.about-identity{display:flex;flex-direction:column;gap:5px;min-width:0}
+.about-name{font-size:16px;color:#344156}
+.about-project{font-size:11px}
+.about-repository{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.about-repo-url{flex:1;min-width:200px;font-size:11px;line-height:1.8;color:#8896ac;overflow-wrap:anywhere;background:#f7f9fd;padding:11px 13px;border-radius:7px}
 @media(max-width:820px){.download-form{padding:20px}.download-card{padding:19px}.download-card-heading{gap:10px}.download-directory-help{flex-direction:column;gap:4px}.download-form .input-with-button{flex-wrap:wrap}.download-form .input-with-button input{flex-basis:calc(100% - 120px)}.download-form .input-with-button>.button.quiet{padding:5px 0}.download-card-footer{align-items:flex-start;flex-wrap:wrap}.download-destination{flex-basis:100%}.download-actions{margin-left:auto}.download-list-heading>span{font-size:12px}}
 @media(max-width:620px){.download-link-row{flex-direction:column}.download-link-row>.button{align-self:flex-end}.download-card{padding:17px}.download-card-heading{flex-wrap:wrap}.download-status{margin-left:55px}.download-metrics{gap:9px;font-size:12px}.download-percent{font-size:12px}.download-form{padding:19px}.download-form .input-with-button input{flex-basis:100%}.settings-directory .input-with-button{flex-wrap:wrap}.settings-directory input{flex-basis:100%}.download-list-heading{align-items:flex-start}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}

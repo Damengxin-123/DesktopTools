@@ -116,6 +116,8 @@ public:
     Q_INVOKABLE QVariantMap resetSettings();
     // 使用资源管理器打开数据目录。
     Q_INVOKABLE QVariantMap openDataDirectory();
+    // 使用系统浏览器打开本项目的 GitHub 仓库。
+    Q_INVOKABLE QVariantMap openGithubRepository();
     // 返回版本、数据目录和热键启动状态。
     Q_INVOKABLE QVariantMap getAppInfo() const;
 signals:

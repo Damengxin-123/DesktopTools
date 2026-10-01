@@ -1053,6 +1053,7 @@
     listen("settings-form", "submit", saveSettings);
     listen("reset-settings", "click", resetSettings);
     listen("open-data-directory", "click", async function openDataDirectory(event) { await perform(function invokeOpenDataDirectory() { return window.desktopBridge.call("openDataDirectory"); }, "已打开数据目录", event.currentTarget); });
+    listen("open-github-repository", "click", async function openGitHubRepository(event) { await perform(function invokeOpenGitHubRepository() { return window.desktopBridge.call("openGithubRepository"); }, "已在浏览器中打开仓库", event.currentTarget); });
     listen("dialog-form", "submit", submitDialog);
     listen("dialog-cancel", "click", closeDialog); listen("dialog-close", "click", closeDialog);
     listen("app-dialog", "cancel", function dialogEscapePressed(event) { event.preventDefault(); closeDialog(); });

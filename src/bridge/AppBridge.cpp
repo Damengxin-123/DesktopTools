@@ -211,6 +211,15 @@ QVariantMap AppBridge::openDataDirectory()
     return ServiceResult::success();
 }
 
+QVariantMap AppBridge::openGithubRepository()
+{
+    // 仓库地址固定在原生侧，网页无法请求打开任意外部链接。
+    static const QUrl repository(QStringLiteral("https://github.com/Damengxin-123/DesktopTools"));
+    if (!QDesktopServices::openUrl(repository))
+        return ServiceResult::failure(QStringLiteral("无法打开浏览器，请手动访问：") + repository.toString());
+    return ServiceResult::success();
+}
+
 QVariantMap AppBridge::getAppInfo() const
 {
     return ServiceResult::success(QVariantMap{{"version", QCoreApplication::applicationVersion()},

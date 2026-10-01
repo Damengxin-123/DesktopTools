@@ -133,6 +133,12 @@
     check((await call("getSettings")).autoStart === false, "恢复默认未关闭开机自启");
     await waitFor(() => !element("#auto-start").checked, "恢复默认后未同步自启复选框");
 
+    // 关于卡片：头像与昵称随应用打包展示，跳转按钮调用原生接口打开固定仓库（测试不点击）。
+    await waitFor(() => element("#github-avatar").naturalWidth > 0, "GitHub 头像未加载");
+    check(element(".about-name").textContent === "天涯快乐人", "关于昵称显示错误");
+    check(element(".about-repo-url").textContent === "https://github.com/Damengxin-123/DesktopTools", "仓库地址显示错误");
+    check(element("#open-github-repository").textContent.includes("跳转"), "仓库跳转按钮缺失");
+
     // 批量删除和分类删除均由后端执行，不触发任何外部程序。
     await call("deleteShortcuts", [first.id, second.id]);
     await call("deleteShortcutCategory", category.id);
