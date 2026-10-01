@@ -19,7 +19,7 @@
     noteLoadVersion: 0, // 忽略已过期的便签加载结果。
     shortcutLoadVersion: 0, // 忽略已过期的快捷方式列表结果。
     notesLoadVersion: 0, // 忽略已过期的便签目录结果。
-    settings: { fontSize: 16, hotkeyModifier: 0, hotkeyKey: 119, downloadDirectory: "" }, // 最近保存的界面、热键和默认下载路径。
+    settings: { fontSize: 16, hotkeyModifier: 0, hotkeyKey: 119, downloadDirectory: "", autoStart: false }, // 最近保存的界面、热键、默认下载路径和开机自启状态。
     hotkeyDraft: { modifier: 0, key: 119 }, // 正在输入的热键。
     settingsDirty: false, // 设置表单是否已修改。
     settingsSaving: false, // 设置提交期间不以信号覆盖表单。
@@ -553,7 +553,7 @@
 
   // 切换侧栏页面，未保存便签必须先确认。
   function navigate(page) {
-    if (page === state.page || !["shortcuts", "notes", "downloads", "settings"].includes(page)) return;
+    if (page === state.page || !["shortcuts", "notes", "downloads", "clipboard", "settings"].includes(page)) return;
     if (state.page === "notes") {
       if (!canLeaveNote()) return;
       if (state.noteDirty) clearNoteEditor();
@@ -563,7 +563,7 @@
       if (state.settingsDirty) applySettings(state.settings);
     }
     state.page = page;
-    for (const name of ["shortcuts", "notes", "downloads", "settings"]) byId("page-" + name).hidden = name !== page;
+    for (const name of ["shortcuts", "notes", "downloads", "clipboard", "settings"]) byId("page-" + name).hidden = name !== page;
     document.querySelectorAll(".nav-button").forEach(function updateNavigation(node) {
       const active = node.dataset.page === page;
       node.classList.toggle("active", active);
@@ -888,6 +888,7 @@
     state.settingsDirty = false;
     state.hotkeyDraft = { modifier: Number(settings.hotkeyModifier), key: Number(settings.hotkeyKey) };
     byId("font-size").value = String(settings.fontSize);
+    byId("auto-start").checked = settings.autoStart === true;
     byId("hotkey-input").value = hotkeyName(state.hotkeyDraft.modifier, state.hotkeyDraft.key);
     byId("download-default-directory").value = String(settings.downloadDirectory || "");
     window.desktopDownloads.setDefaultDirectory(settings.downloadDirectory);
@@ -906,7 +907,7 @@
     byId("hotkey-warning").hidden = !warning;
   }
 
-  // 保存字体与热键，并刷新原生注册结果。
+  // 保存字体、热键、下载目录和开机自启，并刷新原生注册结果。
   async function saveSettings(event) {
     event.preventDefault();
     if (state.settingsSaving || !byId("settings-form").reportValidity()) return;
@@ -919,6 +920,7 @@
         fontSize, // 列表与便签的字号。
         hotkeyModifier: state.hotkeyDraft.modifier, // Windows 热键修饰键组合。
         hotkeyKey: state.hotkeyDraft.key, // Windows 主键虚拟码。
+        autoStart: byId("auto-start").checked, // 当前用户登录 Windows 时是否自动启动。
         downloadDirectory: byId("download-default-directory").value.trim() // 用户提交的默认下载目录。
       });
       applySettings(settings);
@@ -932,7 +934,7 @@
   function resetSettings() {
     if (state.settingsSaving) return;
     const body = element("div");
-    body.append(element("p", "dialog-description", "恢复为 16 px 字体、F8 唤起快捷键和系统默认下载目录？\n已有快捷方式、便签和下载文件不会改变。"));
+    body.append(element("p", "dialog-description", "恢复为 16 px 字体、F8 唤起快捷键和系统默认下载目录，并关闭开机自启？\n已有快捷方式、便签和下载文件不会改变。"));
     showDialog("恢复默认设置", body, async function confirmResetSettings() {
       state.settingsSaving = true;
       try {
@@ -958,7 +960,7 @@
     byId("retry-connection").disabled = true;
     try {
       await window.desktopBridge.connect();
-      await Promise.all([refreshShortcuts(), refreshNotes(), window.desktopBridge.call("getSettings").then(applySettings), refreshAppInfo(), window.desktopDownloads.initialize({ toast, reportError })]);
+      await Promise.all([refreshShortcuts(), refreshNotes(), window.desktopBridge.call("getSettings").then(applySettings), refreshAppInfo(), window.desktopDownloads.initialize({ toast, reportError }), window.desktopClipboard.initialize({ toast, reportError })]);
       if (!state.connected) {
         await window.desktopBridge.on("shortcutsChanged", function shortcutsChanged() { scheduleRefresh("shortcuts", refreshShortcuts); });
         await window.desktopBridge.on("notesChanged", function notesChanged() { scheduleRefresh("notes", refreshNotes); });
@@ -1047,6 +1049,7 @@
     listen("hotkey-input", "keydown", captureHotkey);
     listen("font-size", "input", function fontSizeChanged() { previewFont(); markSettingsDirty(); });
     listen("download-default-directory", "input", markSettingsDirty);
+    listen("auto-start", "change", markSettingsDirty);
     listen("settings-form", "submit", saveSettings);
     listen("reset-settings", "click", resetSettings);
     listen("open-data-directory", "click", async function openDataDirectory(event) { await perform(function invokeOpenDataDirectory() { return window.desktopBridge.call("openDataDirectory"); }, "已打开数据目录", event.currentTarget); });

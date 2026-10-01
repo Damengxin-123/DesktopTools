@@ -2,6 +2,7 @@
 
 #include "app/GlobalHotkey.h"
 #include "services/DownloadService.h"
+#include "services/ClipboardService.h"
 #include "services/NoteService.h"
 #include "services/ServiceResult.h"
 #include "services/SettingsService.h"
@@ -13,21 +14,41 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QJsonValue>
+#include <QSettings>
 #include <QUrl>
 #include <QWidget>
+
+namespace
+{
+// 只为正式运行连接当前用户的 Windows 自启注册表；测试不接触系统启动项。
+QSettings* startupSettings(bool nativeIntegration, QObject* owner)
+{
+#ifdef Q_OS_WIN
+    if (nativeIntegration)
+        return new QSettings(QStringLiteral("HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Run"),
+                             QSettings::NativeFormat, owner);
+#else
+    Q_UNUSED(nativeIntegration);
+    Q_UNUSED(owner);
+#endif
+    return nullptr;
+}
+}
 
 AppBridge::AppBridge(const QString& dataRoot, QWidget* window, bool nativeIntegration)
     : QObject(window), m_dataRoot(QDir(dataRoot).absolutePath()), m_window(window),
       m_shortcuts(new ShortcutService(m_dataRoot, this)),
       m_notes(new NoteService(m_dataRoot, this)),
-      m_settings(new SettingsService(m_dataRoot, this)),
+      m_settings(new SettingsService(m_dataRoot, this, startupSettings(nativeIntegration, this))),
       m_downloads(new DownloadService(m_dataRoot, this)),
+      m_clipboard(new ClipboardService(m_dataRoot, nativeIntegration, this)),
       m_hotkey(new GlobalHotkey(nativeIntegration, this))
 {
     connect(m_shortcuts, &ShortcutService::changed, this, &AppBridge::shortcutsChanged);
     connect(m_notes, &NoteService::changed, this, &AppBridge::notesChanged);
     connect(m_settings, &SettingsService::changed, this, &AppBridge::settingsChanged);
     connect(m_downloads, &DownloadService::changed, this, &AppBridge::downloadsChanged);
+    connect(m_clipboard, &ClipboardService::changed, this, &AppBridge::clipboardChanged);
     connect(m_hotkey, &GlobalHotkey::activated, this, &AppBridge::activateWindowRequested);
     const auto result = m_settings->snapshot();
     if (result.value("ok").toBool()) {
@@ -68,6 +89,15 @@ QVariantMap AppBridge::copyText(const QString& text)
 }
 
 QVariantMap AppBridge::getNotes() const { return m_notes->snapshot(); }
+QVariantMap AppBridge::getClipboardHistory(const QString& query) const { return m_clipboard->snapshot(query); }
+QVariantMap AppBridge::setClipboardTypes(const QStringList& types) { return m_clipboard->setTypes(types); }
+QVariantMap AppBridge::getClipboardItem(const QString& id) const { return m_clipboard->read(id); }
+QVariantMap AppBridge::copyClipboardItem(const QString& id) { return m_clipboard->copy(id); }
+QVariantMap AppBridge::pinClipboardItem(const QString& id, bool pinned) { return m_clipboard->pin(id, pinned); }
+QVariantMap AppBridge::deleteClipboardItems(const QStringList& ids) { return m_clipboard->remove(ids); }
+QVariantMap AppBridge::clearClipboardHistory() { return m_clipboard->clear(); }
+QVariantMap AppBridge::openClipboardDirectory(const QString& id, int fileIndex)
+{ return m_clipboard->openDirectory(id, fileIndex); }
 QVariantMap AppBridge::getNote(const QString& id) const { return m_notes->readNote(id); }
 QVariantMap AppBridge::saveNote(const QVariantMap& note) { return m_notes->saveNote(note); }
 QVariantMap AppBridge::deleteNotes(const QStringList& ids) { return m_notes->removeNotes(ids); }
@@ -144,7 +174,7 @@ QVariantMap AppBridge::saveSettings(const QVariantMap& settings)
 QVariantMap AppBridge::resetSettings()
 {
     return saveSettings({{"fontSize", 16}, {"hotkeyModifier", 0}, {"hotkeyKey", 0x77},
-        {"downloadDirectory", QString()}});
+        {"downloadDirectory", QString()}, {"autoStart", false}});
 }
 
 QVariantMap AppBridge::openDataDirectory()

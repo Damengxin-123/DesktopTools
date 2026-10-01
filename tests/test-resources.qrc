@@ -3,5 +3,6 @@
     <file>web-smoke.js</file>
     <file>download-smoke.js</file>
     <file>magnet-smoke.js</file>
+    <file>clipboard-smoke.js</file>
   </qresource>
 </RCC>

@@ -6,6 +6,7 @@
 
 class GlobalHotkey;
 class DownloadService;
+class ClipboardService;
 class NoteService;
 class SettingsService;
 class ShortcutService;
@@ -16,7 +17,7 @@ class AppBridge final : public QObject
 {
     Q_OBJECT
 public:
-    // 创建服务并加载兼容数据；测试可关闭系统热键注册。
+    // 创建服务并加载兼容数据；测试可关闭热键、自启项和剪贴板等系统操作。
     explicit AppBridge(const QString& dataRoot, QWidget* window, bool nativeIntegration = true);
     // 返回快捷方式和分类快照。
     Q_INVOKABLE QVariantMap getShortcuts() const;
@@ -36,6 +37,22 @@ public:
     Q_INVOKABLE QVariantMap chooseTarget(int type);
     // 将文本复制到系统剪贴板。
     Q_INVOKABLE QVariantMap copyText(const QString& text);
+    // 查询剪贴板摘要，可搜索完整文本、文件名及路径。
+    Q_INVOKABLE QVariantMap getClipboardHistory(const QString& query) const;
+    // 保存监听类型，全部取消勾选时暂停记录。
+    Q_INVOKABLE QVariantMap setClipboardTypes(const QStringList& types);
+    // 读取完整剪贴板记录。
+    Q_INVOKABLE QVariantMap getClipboardItem(const QString& id) const;
+    // 将历史内容恢复到系统剪贴板。
+    Q_INVOKABLE QVariantMap copyClipboardItem(const QString& id);
+    // 设置或取消历史记录的置顶状态。
+    Q_INVOKABLE QVariantMap pinClipboardItem(const QString& id, bool pinned);
+    // 批量删除历史记录，保留引用的原文件。
+    Q_INVOKABLE QVariantMap deleteClipboardItems(const QStringList& ids);
+    // 清空历史并保留监听类型。
+    Q_INVOKABLE QVariantMap clearClipboardHistory();
+    // 打开指定文件引用的所在目录。
+    Q_INVOKABLE QVariantMap openClipboardDirectory(const QString& id, int fileIndex);
     // 返回便签列表与分类。
     Q_INVOKABLE QVariantMap getNotes() const;
     // 读取指定便签的安全 HTML 内容。
@@ -76,7 +93,7 @@ public:
     Q_INVOKABLE QVariantMap getSettings() const;
     // 校验、切换系统热键并持久化设置，失败时恢复旧组合。
     Q_INVOKABLE QVariantMap saveSettings(const QVariantMap& settings);
-    // 恢复默认字号、F8 热键和系统下载目录。
+    // 恢复默认字号、F8 热键和系统下载目录，并关闭开机自启。
     Q_INVOKABLE QVariantMap resetSettings();
     // 使用资源管理器打开数据目录。
     Q_INVOKABLE QVariantMap openDataDirectory();
@@ -91,6 +108,8 @@ signals:
     void settingsChanged();
     // 下载任务状态、进度或历史记录发生变化。
     void downloadsChanged();
+    // 剪贴板历史、监听设置或保存提示已变化。
+    void clipboardChanged();
     // 热键请求唤醒主窗口。
     void activateWindowRequested();
 private:
@@ -106,6 +125,8 @@ private:
     SettingsService* m_settings;
     // 下载任务服务，由本对象管理生命周期。
     DownloadService* m_downloads;
+    // 剪贴板监听和持久化服务。
+    ClipboardService* m_clipboard;
     // 全局热键注册器。
     GlobalHotkey* m_hotkey;
     // 启动时热键注册失败的说明。

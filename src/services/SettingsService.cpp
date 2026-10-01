@@ -1,12 +1,14 @@
 #include "SettingsService.h"
 #include "ServiceResult.h"
 
+#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonParseError>
 #include <QSaveFile>
+#include <QSettings>
 #include <QStandardPaths>
 #include <QTemporaryFile>
 
@@ -14,6 +16,19 @@
 
 namespace
 {
+// 写入或移除本程序的自启值，使用独立实例检查本次写入与实际回读结果。
+bool writeStartupValue(QSettings* storage, const QVariant& value)
+{
+    QSettings entry(storage->fileName(), storage->format());
+    const QString key = QStringLiteral("DesktopTool");
+    if (value.isValid())
+        entry.setValue(key, value);
+    else
+        entry.remove(key);
+    entry.sync();
+    return entry.status() == QSettings::NoError && entry.value(key) == value;
+}
+
 // 只接受有限整数，避免小数或字符串被静默转换为设置值。
 bool integerValue(const QVariant& value, int minimum, int maximum)
 {
@@ -53,9 +68,13 @@ QString checkDownloadDirectory(const QString& path)
 }
 }
 
-SettingsService::SettingsService(const QString& dataRoot, QObject* parent)
+SettingsService::SettingsService(const QString& dataRoot, QObject* parent, QSettings* startupSettings)
     : QObject(parent)
     , m_path(QDir(dataRoot).filePath(QStringLiteral("setting/system_config.json")))
+    , m_startupSettings(startupSettings)
+    // 数据目录使用正斜杠，避免盘符根目录末尾的反斜杠转义结束引号。
+    , m_startupCommand(QStringLiteral("\"%1\" --data-dir \"%2\"")
+          .arg(QDir::toNativeSeparators(QCoreApplication::applicationFilePath()), QDir(dataRoot).absolutePath()))
 {
     QFile file(m_path);
     if (!file.exists())
@@ -81,7 +100,14 @@ SettingsService::SettingsService(const QString& dataRoot, QObject* parent)
 
 QVariantMap SettingsService::data() const
 {
+    // 原生模式以系统自启项为准，允许用户从系统中删除后重新启用。
+    if (m_startupSettings)
+        m_startupSettings->sync();
     return {
+        {QStringLiteral("autoStart"), m_startupSettings
+             ? QVariant(!m_startupSettings->value(QStringLiteral("DesktopTool")).toString().isEmpty())
+             : m_document.contains(QStringLiteral("auto_start"))
+                 ? m_document.value(QStringLiteral("auto_start")).toVariant() : QVariant(false)},
         {QStringLiteral("fontSize"), m_document.contains(QStringLiteral("tree_view_font_size"))
              ? m_document.value(QStringLiteral("tree_view_font_size")).toVariant() : QVariant(16)},
         {QStringLiteral("hotkeyModifier"), m_document.contains(QStringLiteral("hotkey_modifier"))
@@ -100,6 +126,9 @@ QVariantMap SettingsService::validate(const QVariantMap& settings)
 
 QVariantMap SettingsService::validateValues(const QVariantMap& settings, bool checkDirectory)
 {
+    if (settings.contains(QStringLiteral("autoStart"))
+        && !QJsonValue::fromVariant(settings.value(QStringLiteral("autoStart"))).isBool())
+        return ServiceResult::failure(QStringLiteral("开机自启必须为勾选或未勾选状态。"));
     if (!integerValue(settings.value(QStringLiteral("fontSize")), 8, 32))
         return ServiceResult::failure(QStringLiteral("字体大小必须为 8 至 32 的整数。"));
     if (!integerValue(settings.value(QStringLiteral("hotkeyModifier")), 0, 15))
@@ -113,7 +142,8 @@ QVariantMap SettingsService::validateValues(const QVariantMap& settings, bool ch
     for (auto iterator = settings.cbegin(); iterator != settings.cend(); ++iterator)
     {
         if (iterator.key() != QStringLiteral("fontSize") && iterator.key() != QStringLiteral("hotkeyModifier")
-            && iterator.key() != QStringLiteral("hotkeyKey") && iterator.key() != QStringLiteral("downloadDirectory"))
+            && iterator.key() != QStringLiteral("hotkeyKey") && iterator.key() != QStringLiteral("downloadDirectory")
+            && iterator.key() != QStringLiteral("autoStart"))
             return ServiceResult::failure(QStringLiteral("未知的设置字段：%1").arg(iterator.key()));
     }
     if (settings.contains(QStringLiteral("downloadDirectory"))
@@ -132,6 +162,7 @@ QVariantMap SettingsService::validateValues(const QVariantMap& settings, bool ch
             return ServiceResult::failure(directoryError);
     }
     return ServiceResult::success(QVariantMap{
+        {QStringLiteral("autoStart"), settings.value(QStringLiteral("autoStart"), false).toBool()},
         {QStringLiteral("fontSize"), settings.value(QStringLiteral("fontSize")).toInt()},
         {QStringLiteral("hotkeyModifier"), settings.value(QStringLiteral("hotkeyModifier")).toInt()},
         {QStringLiteral("hotkeyKey"), key},
@@ -156,6 +187,7 @@ QVariantMap SettingsService::save(const QVariantMap& settings)
         return validation;
     candidate = validation.value(QStringLiteral("data")).toMap();
     QJsonObject document = m_document;
+    document.insert(QStringLiteral("auto_start"), candidate.value(QStringLiteral("autoStart")).toBool());
     document.insert(QStringLiteral("tree_view_font_size"), candidate.value(QStringLiteral("fontSize")).toInt());
     document.insert(QStringLiteral("hotkey_modifier"), candidate.value(QStringLiteral("hotkeyModifier")).toInt());
     document.insert(QStringLiteral("hotkey_key"), candidate.value(QStringLiteral("hotkeyKey")).toInt());
@@ -166,8 +198,25 @@ QVariantMap SettingsService::save(const QVariantMap& settings)
     if (!file.open(QIODevice::WriteOnly))
         return ServiceResult::failure(QStringLiteral("无法写入设置：%1").arg(file.errorString()));
     const QByteArray payload = QJsonDocument(document).toJson(QJsonDocument::Indented);
-    if (file.write(payload) != payload.size() || !file.commit())
+    if (file.write(payload) != payload.size())
         return ServiceResult::failure(QStringLiteral("保存设置失败，原设置保持不变：%1").arg(file.errorString()));
+    const QVariant previousStartup = m_startupSettings
+        ? m_startupSettings->value(QStringLiteral("DesktopTool")) : QVariant();
+    const QVariant nextStartup = candidate.value(QStringLiteral("autoStart")).toBool()
+        ? QVariant(m_startupCommand) : QVariant();
+    const bool changeStartup = m_startupSettings && previousStartup != nextStartup;
+    if (changeStartup && !writeStartupValue(m_startupSettings, nextStartup)) {
+        const bool restored = writeStartupValue(m_startupSettings, previousStartup);
+        return ServiceResult::failure(restored
+            ? QStringLiteral("无法修改开机自启项，请检查当前用户的注册表写入权限。设置未保存。")
+            : QStringLiteral("无法修改或恢复开机自启项，请检查系统启动项及注册表写入权限。设置未保存。"));
+    }
+    if (!file.commit()) {
+        const bool restored = !changeStartup || writeStartupValue(m_startupSettings, previousStartup);
+        return ServiceResult::failure(restored
+            ? QStringLiteral("保存设置失败，原设置保持不变：%1").arg(file.errorString())
+            : QStringLiteral("保存设置失败，且无法恢复开机自启项，请检查系统启动项：%1").arg(file.errorString()));
+    }
     m_document = document;
     emit changed();
     return ServiceResult::success(candidate);

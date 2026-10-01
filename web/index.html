@@ -9,6 +9,7 @@
   <script defer src="qrc:///qtwebchannel/qwebchannel.js"></script>
   <script defer src="bridge.js"></script>
   <script defer src="downloads.js"></script>
+  <script defer src="clipboard.js"></script>
   <script defer src="app.js"></script>
 </head>
 <body>
@@ -20,6 +21,7 @@
         <button class="nav-button active" data-page="shortcuts" aria-current="page"><span aria-hidden="true">↗</span>快捷方式<span class="nav-count" id="shortcut-count">0</span></button>
         <button class="nav-button" data-page="notes"><span aria-hidden="true">▤</span>便签<span class="nav-count" id="note-count">0</span></button>
         <button class="nav-button" data-page="downloads"><span aria-hidden="true">↓</span>下载<span class="nav-count" id="download-count">0</span></button>
+        <button class="nav-button" data-page="clipboard"><span aria-hidden="true">▣</span>剪贴板<span class="nav-count" id="clipboard-count">0</span></button>
         <button class="nav-button" data-page="settings"><span aria-hidden="true">⚙</span>设置</button>
       </nav>
       <div class="sidebar-bottom"><span class="status-dot" id="connection-dot"></span><span id="connection-status">正在连接桌面程序…</span><span class="version" id="app-version"></span></div>
@@ -73,15 +75,33 @@
           <div id="download-empty" class="empty-state"><div class="empty-icon" aria-hidden="true">↓</div><h2>开始你的第一个下载</h2><p>在上方粘贴链接，文件将保存到你选择的目录。</p></div>
           <p class="download-background-hint">隐藏到托盘后，下载会继续进行；退出程序时会保留任务，便于下次继续。</p>
         </section>
+        <section class="page clipboard-page" id="page-clipboard" aria-labelledby="clipboard-heading" hidden>
+          <header class="page-header"><div><div class="eyebrow">CLIPBOARD HISTORY</div><h1 id="clipboard-heading">剪贴板</h1><p>留住每一次复制，随时找回需要的内容。</p></div><span id="clipboard-status" class="muted" role="status">尚未开启记录</span></header>
+          <fieldset id="clipboard-types" class="clipboard-types"><legend>自动保存的内容类型</legend><div class="clipboard-type-options">
+            <label class="check-label"><input type="checkbox" value="text">文本</label>
+            <label class="check-label"><input type="checkbox" value="image">图像</label>
+            <label class="check-label"><input type="checkbox" value="files">文件 / 文件夹</label>
+            <label class="check-label"><input type="checkbox" value="links">链接</label>
+            <label class="check-label"><input type="checkbox" value="other">其他（格式信息）</label>
+          </div><p class="field-help">勾选即生效；全部取消可暂停记录。文件仅保存名称和路径，其他类型仅保存格式说明。普通网址文本归入“文本”。</p></fieldset>
+          <p class="field-help">程序运行或隐藏到托盘时持续监听；退出后停止。最多保存 500 条 / 64 MB，超限清理最早的未置顶记录。</p>
+          <div id="clipboard-error" class="notice warning" role="alert" hidden></div>
+          <div class="section-toolbar clipboard-search-row"><label class="search-field"><span aria-hidden="true">⌕</span><input id="clipboard-search" type="search" placeholder="搜索完整文本、文件名或路径…" aria-label="搜索剪贴板历史"></label><select id="clipboard-filter" aria-label="筛选历史类型"><option value="">全部类型</option><option value="text">文本</option><option value="image">图像</option><option value="files">文件 / 文件夹</option><option value="links">链接</option><option value="other">其他</option></select><button id="clipboard-refresh" class="button secondary">刷新</button></div>
+          <div class="selection-toolbar clipboard-selection"><label class="check-label"><input id="clipboard-select-all" type="checkbox">全选当前结果</label><span id="clipboard-selection-info" class="muted">0 条记录</span><button id="clipboard-delete" class="button danger quiet" disabled>删除已选</button><button id="clipboard-clear" class="button danger quiet" disabled>清空历史</button></div>
+          <div id="clipboard-list" class="clipboard-grid" aria-label="剪贴板历史"></div>
+          <div id="clipboard-empty" class="empty-state"><div class="empty-icon" aria-hidden="true">▣</div><h2>还没有剪贴板记录</h2><p>勾选上方内容类型后，新的复制内容会自动出现在这里。</p></div>
+          <div class="clipboard-pagination"><button id="clipboard-previous" class="button secondary" disabled>上一页</button><span id="clipboard-page-info" class="muted">第 1 / 1 页</span><button id="clipboard-next" class="button secondary" disabled>下一页</button></div>
+        </section>
         <section class="page settings-page" id="page-settings" aria-labelledby="settings-heading" hidden>
           <header class="page-header"><div><div class="eyebrow">PREFERENCES</div><h1 id="settings-heading">设置</h1><p>调整适合自己的工作方式。</p></div></header>
           <form id="settings-form" class="settings-card">
+            <div class="settings-section"><h2>启动</h2><div class="setting-row"><div><label for="auto-start">开机自启</label><p id="auto-start-help">勾选后，在当前用户登录 Windows 时自动启动。点击“保存设置”生效。</p></div><input id="auto-start" type="checkbox" aria-describedby="auto-start-help"></div></div>
             <div class="settings-section"><h2>界面</h2><div class="setting-row"><div><label for="font-size">字体大小</label><p>应用于列表和便签内容，单位为像素。</p></div><div class="number-control"><input id="font-size" type="number" min="8" max="32" value="16" required><span>px</span></div></div></div>
             <div class="settings-section"><h2>快捷键</h2><div class="setting-row"><div><label for="hotkey-input">唤起桌面工具</label><p>点击输入框后，按下需要的按键组合。</p></div><input id="hotkey-input" class="hotkey-input" type="text" readonly value="F8" aria-describedby="hotkey-help"></div><p class="field-help" id="hotkey-help">支持 Ctrl、Alt、Shift、Win 和功能键；按 Tab 可离开输入框。</p><div id="hotkey-warning" class="notice warning" hidden></div></div>
             <div class="settings-section"><h2>下载</h2><label class="form-field settings-directory" for="download-default-directory"><span>默认下载目录</span><div class="input-with-button"><input id="download-default-directory" type="text" placeholder="选择默认下载目录" autocomplete="off" spellcheck="false"><button id="choose-default-download-directory" type="button" class="button secondary">选择目录…</button></div></label><p class="field-help">创建任务未指定有效目录时，文件将保存到这里。修改后点击“保存设置”生效。</p></div>
             <div class="settings-actions"><button type="submit" class="button primary">保存设置</button><button id="reset-settings" type="button" class="button secondary">恢复默认</button><span id="settings-save-state" class="muted" role="status"></span></div>
           </form>
-          <div class="settings-card data-card"><h2>本地数据</h2><p class="muted">快捷方式、便签、设置和下载记录保存在此设备。下载文件保存在各任务指定的目录。</p><code id="data-path" class="data-path">正在读取…</code><button id="open-data-directory" class="button secondary">打开数据目录 ↗</button></div>
+          <div class="settings-card data-card"><h2>本地数据</h2><p class="muted">快捷方式、便签、剪贴板历史、设置和下载记录保存在此设备。下载文件保存在各任务指定的目录。</p><code id="data-path" class="data-path">正在读取…</code><button id="open-data-directory" class="button secondary">打开数据目录 ↗</button></div>
         </section>
       </div>
     </main>
@@ -101,5 +121,6 @@
       <div class="dialog-actions"><button id="download-files-reload" type="button" class="button quiet" hidden>重新读取</button><button id="download-files-later" type="button" class="button secondary">稍后选择</button><button id="download-files-confirm" type="submit" class="button primary" disabled>开始下载</button></div>
     </form>
   </dialog>
+  <dialog id="clipboard-dialog" class="app-dialog clipboard-dialog" aria-labelledby="clipboard-dialog-title"><div class="dialog-heading"><h2 id="clipboard-dialog-title">剪贴板详情</h2><button id="clipboard-dialog-close" class="icon-button" aria-label="关闭剪贴板详情">×</button></div><div id="clipboard-dialog-body"></div><div class="dialog-actions"><button id="clipboard-dialog-cancel" class="button secondary">关闭</button><button id="clipboard-dialog-confirm" class="button danger primary" hidden>确认删除</button></div><p id="clipboard-dialog-error" class="field-error" role="alert" hidden></p></dialog>
 </body>
 </html>

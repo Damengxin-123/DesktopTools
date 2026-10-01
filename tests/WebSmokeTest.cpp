@@ -1,6 +1,7 @@
 #include "app/WebWindow.h"
 #include "app/GlobalHotkey.h"
 #include "bridge/AppBridge.h"
+#include "services/ClipboardService.h"
 #include "DownloadPageServer.h"
 #include "TorrentTestPeer.h"
 
@@ -12,6 +13,8 @@
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QMimeData>
+#include <QImage>
 #include <QPointer>
 #include <QTemporaryDir>
 #include <QTest>
@@ -35,6 +38,10 @@ private slots:
     void magnetsThroughPage();
     // 下载历史损坏时只禁用下载操作，既有页面仍然可用。
     void damagedDownloadHistoryIsIsolated();
+    // 验证剪贴板类型设置、卡片、搜索、置顶、详情和批量删除。
+    void clipboardThroughPage();
+    // 剪贴板索引损坏时保留原文件，其他页面继续可用。
+    void damagedClipboardHistoryIsIsolated();
 private:
     // 同步等待一次短 JavaScript 求值，带超时防止测试挂起。
     static QVariant evaluate(QWebEnginePage* page, const QString& source);
@@ -309,6 +316,73 @@ void WebSmokeTest::damagedDownloadHistoryIsIsolated()
     QVERIFY(evaluate(page, QStringLiteral("!document.querySelector('#download-list-error').hidden && document.querySelector('#download-list-error').textContent.length > 0")).toBool());
     evaluate(page, QStringLiteral("document.querySelector('[data-page=shortcuts]').click(); true"));
     QVERIFY(evaluate(page, QStringLiteral("!document.querySelector('#page-shortcuts').hidden")).toBool());
+    QVERIFY(history.open(QIODevice::ReadOnly));
+    QCOMPARE(history.readAll(), QByteArray("{broken"));
+}
+
+void WebSmokeTest::clipboardThroughPage()
+{
+    QTemporaryDir directory;
+    WebWindow window(directory.path(), false);
+    window.show();
+    auto* page = window.webView()->page();
+    auto* service = window.findChild<ClipboardService*>();
+    QVERIFY(service);
+    QTRY_VERIFY_WITH_TIMEOUT(evaluate(page, QStringLiteral("document.documentElement.dataset.ready === 'true'")).toBool(), 20000);
+    evaluate(page, QStringLiteral("document.querySelector('[data-page=clipboard]').click(); document.querySelector('#clipboard-types input[value=text]').click(); true"));
+    QTRY_VERIFY(service->snapshot().value("data").toMap().value("types").toStringList().contains("text"));
+    QTRY_VERIFY(!evaluate(page, QStringLiteral("document.querySelector('#clipboard-types').disabled")).toBool());
+    evaluate(page, QStringLiteral("document.querySelector('#clipboard-types input[value=image]').click(); true"));
+    QTRY_VERIFY(service->snapshot().value("data").toMap().value("types").toStringList().contains("image"));
+    QTRY_VERIFY(!evaluate(page, QStringLiteral("document.querySelector('#clipboard-types').disabled")).toBool());
+    evaluate(page, QStringLiteral("document.querySelector('#clipboard-types input[value=files]').click(); true"));
+    QTRY_VERIFY(service->snapshot().value("data").toMap().value("types").toStringList().contains("files"));
+    QMimeData text;
+    text.setText(QStringLiteral("今天的灵感\n把重要的内容留在这里。<script>window.clipboardInjected = true</script>"));
+    QVERIFY(service->capture(&text).value("ok").toBool());
+    QImage image(200, 100, QImage::Format_RGB32);
+    image.fill(QColor("#6385ee"));
+    QMimeData picture;
+    picture.setImageData(image);
+    QVERIFY(service->capture(&picture).value("ok").toBool());
+    QMimeData file;
+    file.setUrls({QUrl::fromLocalFile(directory.filePath(QStringLiteral("项目资料/需求说明.pdf")))});
+    QVERIFY(service->capture(&file).value("ok").toBool());
+    QTRY_COMPARE(evaluate(page, QStringLiteral("document.querySelectorAll('.clipboard-card').length")).toInt(), 3);
+    QVERIFY(!evaluate(page, QStringLiteral("Boolean(window.clipboardInjected)")).toBool());
+    QVERIFY(evaluate(page, QStringLiteral("[...document.querySelectorAll('.clipboard-card time')].every(n => n.dateTime && n.textContent.includes(':'))")).toBool());
+    QTRY_VERIFY(evaluate(page, QStringLiteral("document.querySelector('.clipboard-thumbnail').naturalWidth > 0")).toBool());
+    const QString capture = qEnvironmentVariable("DESKTOPTOOL_CLIPBOARD_CAPTURE");
+    if (!capture.isEmpty()) {
+        // 等待离屏合成帧，避免 DOM 已更新但截图仍显示上一帧的空列表。
+        QTest::qWait(400);
+        QVERIFY(window.grab().save(capture));
+        window.resize(860, 600);
+        QTest::qWait(300);
+        QVERIFY(evaluate(page, QStringLiteral("document.documentElement.scrollWidth <= window.innerWidth")).toBool());
+        QVERIFY(window.grab().save(capture + ".narrow.png"));
+        window.resize(1180, 780);
+    }
+    QFile script(QStringLiteral(":/tests/clipboard-smoke.js"));
+    QVERIFY(script.open(QIODevice::ReadOnly));
+    evaluate(page, QString::fromUtf8(script.readAll()));
+    QTRY_VERIFY_WITH_TIMEOUT(!evaluate(page, QStringLiteral("window.__clipboardResult || null")).toMap().isEmpty(), 20000);
+    const auto result = evaluate(page, QStringLiteral("window.__clipboardResult")).toMap();
+    QVERIFY2(result.value("ok").toBool(), qPrintable(result.value("error").toString()));
+}
+
+void WebSmokeTest::damagedClipboardHistoryIsIsolated()
+{
+    QTemporaryDir directory;
+    QFile history(directory.filePath("clipboard-history.v1.json"));
+    QVERIFY(history.open(QIODevice::WriteOnly));
+    history.write("{broken");
+    history.close();
+    WebWindow window(directory.path(), false);
+    window.show();
+    auto* page = window.webView()->page();
+    QTRY_VERIFY_WITH_TIMEOUT(evaluate(page, QStringLiteral("document.documentElement.dataset.ready === 'true'")).toBool(), 20000);
+    QVERIFY(evaluate(page, QStringLiteral("!document.querySelector('#clipboard-error').hidden && document.querySelector('#clipboard-types').disabled && !document.querySelector('#workspace').inert")).toBool());
     QVERIFY(history.open(QIODevice::ReadOnly));
     QCOMPARE(history.readAll(), QByteArray("{broken"));
 }

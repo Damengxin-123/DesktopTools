@@ -4,6 +4,7 @@
     <file alias="styles.css">../web/styles.css</file>
     <file alias="bridge.js">../web/bridge.js</file>
     <file alias="downloads.js">../web/downloads.js</file>
+    <file alias="clipboard.js">../web/clipboard.js</file>
     <file alias="app.js">../web/app.js</file>
   </qresource>
   <qresource prefix="/images">

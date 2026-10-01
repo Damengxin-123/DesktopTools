@@ -9,6 +9,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QSettings>
 #include <QStandardPaths>
 #include <QTemporaryDir>
 
@@ -252,6 +253,66 @@ bool settingsCompatibility()
     return true;
 }
 
+// 使用隔离存储验证自启增删、路径引用、系统状态回读和保存失败保护。
+bool autoStartSettings()
+{
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    const QString root = directory.filePath(QStringLiteral("中文 数据"));
+    REQUIRE(QDir().mkpath(root));
+    QSettings startup(directory.filePath(QStringLiteral("startup.ini")), QSettings::IniFormat);
+    startup.setValue(QStringLiteral("OtherApp"), QStringLiteral("keep"));
+    SettingsService service(root, nullptr, &startup);
+    REQUIRE(!resultData(service.snapshot()).value(QStringLiteral("autoStart")).toBool());
+    REQUIRE(ok(service.save({{QStringLiteral("autoStart"), true}, {QStringLiteral("downloadDirectory"), root}})));
+    const QString expected = QStringLiteral("\"%1\" --data-dir \"%2\"")
+        .arg(QDir::toNativeSeparators(QCoreApplication::applicationFilePath()), root);
+    startup.sync();
+    REQUIRE(startup.value(QStringLiteral("DesktopTool")).toString() == expected);
+    REQUIRE(resultData(service.snapshot()).value(QStringLiteral("autoStart")).toBool());
+    SettingsService reopened(root, nullptr, &startup);
+    REQUIRE(resultData(reopened.snapshot()).value(QStringLiteral("autoStart")).toBool());
+    const QString config = QDir(root).filePath(QStringLiteral("setting/system_config.json"));
+    const QByteArray original = readFile(config);
+    REQUIRE(QJsonDocument::fromJson(original).object().value(QStringLiteral("auto_start")).toBool());
+    REQUIRE(!ok(service.save({{QStringLiteral("autoStart"), QStringLiteral("false")}})));
+    REQUIRE(!ok(service.save({{QStringLiteral("autoStart"), 1}})));
+    REQUIRE(readFile(config) == original);
+    REQUIRE(startup.value(QStringLiteral("DesktopTool")).toString() == expected);
+
+    // 设置文件不可写时不能提前移除已经存在的自启项。
+    REQUIRE(QFile::rename(config, config + QStringLiteral(".saved")));
+    REQUIRE(QDir().mkdir(config));
+    REQUIRE(!ok(service.save({{QStringLiteral("autoStart"), false}})));
+    startup.sync();
+    REQUIRE(startup.value(QStringLiteral("DesktopTool")).toString() == expected);
+    REQUIRE(QDir().rmdir(config));
+    REQUIRE(QFile::rename(config + QStringLiteral(".saved"), config));
+    REQUIRE(ok(service.save({{QStringLiteral("autoStart"), false}})));
+    startup.sync();
+    REQUIRE(!startup.contains(QStringLiteral("DesktopTool")));
+    REQUIRE(startup.value(QStringLiteral("OtherApp")).toString() == QStringLiteral("keep"));
+
+    // 外部移除系统启动项后，快照必须覆盖配置文件中的旧勾选状态。
+    REQUIRE(ok(service.save({{QStringLiteral("autoStart"), true}})));
+    startup.remove(QStringLiteral("DesktopTool"));
+    startup.sync();
+    REQUIRE(!resultData(service.snapshot()).value(QStringLiteral("autoStart")).toBool());
+
+    // 模拟自启存储不可写，配置文件和成功信号不能发生变化。
+    const QString blockedPath = directory.filePath(QStringLiteral("blocked.ini"));
+    REQUIRE(QDir().mkdir(blockedPath));
+    QSettings blocked(blockedPath, QSettings::IniFormat);
+    SettingsService failing(root, nullptr, &blocked);
+    const QByteArray beforeFailure = readFile(config);
+    int changes = 0;
+    QObject::connect(&failing, &SettingsService::changed, [&changes]() { ++changes; });
+    REQUIRE(!ok(failing.save({{QStringLiteral("autoStart"), true}})));
+    REQUIRE(readFile(config) == beforeFailure);
+    REQUIRE(changes == 0);
+    return true;
+}
+
 // 验证下载目录默认值、部分更新、写权限探测及离线目录的设置恢复。
 bool downloadDirectorySettings()
 {
@@ -314,8 +375,9 @@ int main(int argc, char* argv[])
 {
     QCoreApplication application(argc, argv);
     const bool passed = legacyImport() && catalogCrud() && categoryConflict()
-        && damagedCatalog() && writeFailure() && settingsCompatibility() && downloadDirectorySettings();
+        && damagedCatalog() && writeFailure() && settingsCompatibility() && downloadDirectorySettings()
+        && autoStartSettings();
     if (passed)
-        qInfo() << "CatalogServiceTest: all 7 scenarios passed";
+        qInfo() << "CatalogServiceTest: all 8 scenarios passed";
     return passed ? 0 : 1;
 }

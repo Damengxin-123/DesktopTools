@@ -19,6 +19,7 @@ add_library(DesktopToolCore STATIC
     src/services/ShortcutService.h src/services/ShortcutService.cpp
     src/services/NoteService.h src/services/NoteService.cpp
     src/services/SettingsService.h src/services/SettingsService.cpp
+    src/services/ClipboardService.h src/services/ClipboardService.cpp
     src/services/DownloadService.h src/services/DownloadService.cpp
     src/services/TorrentService.h src/services/TorrentService.cpp
     src/app/GlobalHotkey.h src/app/GlobalHotkey.cpp
@@ -55,6 +56,10 @@ install(DIRECTORY third_party/licenses/ DESTINATION licenses)
 include(CTest)
 if(BUILD_TESTING)
     find_package(Qt6 REQUIRED COMPONENTS Test)
+    add_executable(ClipboardServiceTest tests/ClipboardServiceTest.cpp)
+    target_link_libraries(ClipboardServiceTest PRIVATE DesktopToolCore Qt6::Test)
+    add_test(NAME clipboard-service COMMAND ClipboardServiceTest)
+    set_tests_properties(clipboard-service PROPERTIES TIMEOUT 60 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     add_executable(CatalogServiceTest tests/CatalogServiceTest.cpp)
     target_link_libraries(CatalogServiceTest PRIVATE DesktopToolCore)
     add_test(NAME catalog-services COMMAND CatalogServiceTest)

@@ -111,14 +111,27 @@
     check(imageRejected, "拒绝的图片应返回错误而不是伪装保存成功");
     check((await call("getNote", note.id)).html.includes("图片与过滤验证"), "失败保存破坏了原便签内容");
 
-    // 设置由真实表单提交；测试已关闭 OS 热键注册，不影响用户系统。
+    // 设置由真实表单提交；测试已关闭 OS 热键和自启注册，不影响用户系统。
     element("[data-page='settings']").click();
     await waitFor(() => !element("#page-settings").hidden, "设置页面切换失败");
     input("#font-size", "19");
+    check(!element("#auto-start").checked, "开机自启默认应关闭");
+    element("#auto-start").click();
+    check(element("#settings-save-state").textContent === "尚未保存", "自启勾选未标记未保存状态");
     element("#settings-form").requestSubmit();
     await waitFor(async () => (await call("getSettings")).fontSize === 19, "设置表单未保存到 Qt");
+    await waitFor(() => !element("#settings-form").inert, "设置表单保存未结束");
+    check((await call("getSettings")).autoStart === true, "开机自启勾选未保存到 Qt");
+    check(element("#auto-start").checked, "保存后自启勾选状态丢失");
+    element("#auto-start").click();
+    element("#settings-form").requestSubmit();
+    await waitFor(async () => (await call("getSettings")).autoStart === false, "取消开机自启未保存");
+    await waitFor(() => !element("#settings-form").inert, "取消自启保存未结束");
+    await call("saveSettings", { autoStart: true });
     await call("resetSettings");
     check((await call("getSettings")).fontSize === 16, "恢复默认设置失败");
+    check((await call("getSettings")).autoStart === false, "恢复默认未关闭开机自启");
+    await waitFor(() => !element("#auto-start").checked, "恢复默认后未同步自启复选框");
 
     // 批量删除和分类删除均由后端执行，不触发任何外部程序。
     await call("deleteShortcuts", [first.id, second.id]);
