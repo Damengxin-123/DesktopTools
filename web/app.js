@@ -553,7 +553,7 @@
 
   // 切换侧栏页面，未保存便签必须先确认。
   function navigate(page) {
-    if (page === state.page || !["shortcuts", "notes", "downloads", "clipboard", "settings"].includes(page)) return;
+    if (page === state.page || !["shortcuts", "notes", "emoji", "downloads", "clipboard", "settings"].includes(page)) return;
     if (state.page === "notes") {
       if (!canLeaveNote()) return;
       if (state.noteDirty) clearNoteEditor();
@@ -563,7 +563,7 @@
       if (state.settingsDirty) applySettings(state.settings);
     }
     state.page = page;
-    for (const name of ["shortcuts", "notes", "downloads", "clipboard", "settings"]) byId("page-" + name).hidden = name !== page;
+    for (const name of ["shortcuts", "notes", "emoji", "downloads", "clipboard", "settings"]) byId("page-" + name).hidden = name !== page;
     document.querySelectorAll(".nav-button").forEach(function updateNavigation(node) {
       const active = node.dataset.page === page;
       node.classList.toggle("active", active);
@@ -960,7 +960,7 @@
     byId("retry-connection").disabled = true;
     try {
       await window.desktopBridge.connect();
-      await Promise.all([refreshShortcuts(), refreshNotes(), window.desktopBridge.call("getSettings").then(applySettings), refreshAppInfo(), window.desktopDownloads.initialize({ toast, reportError }), window.desktopClipboard.initialize({ toast, reportError })]);
+      await Promise.all([refreshShortcuts(), refreshNotes(), window.desktopBridge.call("getSettings").then(applySettings), refreshAppInfo(), window.desktopDownloads.initialize({ toast, reportError }), window.desktopClipboard.initialize({ toast, reportError }), window.desktopEmoji.initialize({ toast, reportError })]);
       if (!state.connected) {
         await window.desktopBridge.on("shortcutsChanged", function shortcutsChanged() { scheduleRefresh("shortcuts", refreshShortcuts); });
         await window.desktopBridge.on("notesChanged", function notesChanged() { scheduleRefresh("notes", refreshNotes); });

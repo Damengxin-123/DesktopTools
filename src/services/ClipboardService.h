@@ -25,6 +25,8 @@ public:
     QVariantMap read(const QString& id) const;
     // 恢复历史到系统剪贴板，不生成本程序操作导致的重复历史。
     QVariantMap copy(const QString& id);
+    // 将外部文件写入系统剪贴板供粘贴，同时屏蔽历史记录。
+    QVariantMap copyExternalFile(const QString& path);
     // 设置置顶状态，自动清理时保留置顶记录。
     QVariantMap pin(const QString& id, bool pinned);
     // 删除选中记录，仅清除历史，不删除引用的原文件。

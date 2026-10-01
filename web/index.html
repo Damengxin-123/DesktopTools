@@ -10,6 +10,7 @@
   <script defer src="bridge.js"></script>
   <script defer src="downloads.js"></script>
   <script defer src="clipboard.js"></script>
+  <script defer src="emoji.js"></script>
   <script defer src="app.js"></script>
 </head>
 <body>
@@ -20,6 +21,7 @@
       <nav class="main-nav">
         <button class="nav-button active" data-page="shortcuts" aria-current="page"><span aria-hidden="true">↗</span>快捷方式<span class="nav-count" id="shortcut-count">0</span></button>
         <button class="nav-button" data-page="notes"><span aria-hidden="true">▤</span>便签<span class="nav-count" id="note-count">0</span></button>
+        <button class="nav-button" data-page="emoji"><span aria-hidden="true">☺</span>表情<span class="nav-count" id="emoji-count">0</span></button>
         <button class="nav-button" data-page="downloads"><span aria-hidden="true">↓</span>下载<span class="nav-count" id="download-count">0</span></button>
         <button class="nav-button" data-page="clipboard"><span aria-hidden="true">▣</span>剪贴板<span class="nav-count" id="clipboard-count">0</span></button>
         <button class="nav-button" data-page="settings"><span aria-hidden="true">⚙</span>设置</button>
@@ -92,6 +94,15 @@
           <div id="clipboard-empty" class="empty-state"><div class="empty-icon" aria-hidden="true">▣</div><h2>还没有剪贴板记录</h2><p>勾选上方内容类型后，新的复制内容会自动出现在这里。</p></div>
           <div class="clipboard-pagination"><button id="clipboard-previous" class="button secondary" disabled>上一页</button><span id="clipboard-page-info" class="muted">第 1 / 1 页</span><button id="clipboard-next" class="button secondary" disabled>下一页</button></div>
         </section>
+        <section class="page emoji-page" id="page-emoji" aria-labelledby="emoji-heading" hidden>
+          <header class="page-header"><div><div class="eyebrow">EMOJI LIBRARY</div><h1 id="emoji-heading">表情</h1><p>分类管理表情图片，关键字随时检索。</p></div><button id="add-emoji" class="button primary"><span aria-hidden="true">＋</span>添加表情</button></header>
+          <div id="emoji-error" class="notice warning" role="alert" hidden></div>
+          <div class="section-toolbar"><label class="search-field"><span aria-hidden="true">⌕</span><input id="emoji-search" type="search" placeholder="搜索关键字或文件名…" aria-label="搜索表情"></label><button id="add-emoji-category" class="button secondary">＋ 新建分类</button></div>
+          <div class="category-bar" id="emoji-categories" aria-label="表情分类"></div>
+          <div id="emoji-list" class="emoji-grid" aria-label="表情列表"></div>
+          <div id="emoji-empty" class="empty-state"><div class="empty-icon" aria-hidden="true">☺</div><h2>还没有表情</h2><p>点击“添加表情”选择图片文件，并设置检索关键字。</p></div>
+          <div class="clipboard-pagination"><button id="emoji-previous" class="button secondary" disabled>上一页</button><span id="emoji-page-info" class="muted">第 1 / 1 页</span><button id="emoji-next" class="button secondary" disabled>下一页</button></div>
+        </section>
         <section class="page settings-page" id="page-settings" aria-labelledby="settings-heading" hidden>
           <header class="page-header"><div><div class="eyebrow">PREFERENCES</div><h1 id="settings-heading">设置</h1><p>调整适合自己的工作方式。</p></div></header>
           <form id="settings-form" class="settings-card">
@@ -101,7 +112,7 @@
             <div class="settings-section"><h2>下载</h2><label class="form-field settings-directory" for="download-default-directory"><span>默认下载目录</span><div class="input-with-button"><input id="download-default-directory" type="text" placeholder="选择默认下载目录" autocomplete="off" spellcheck="false"><button id="choose-default-download-directory" type="button" class="button secondary">选择目录…</button></div></label><p class="field-help">创建任务未指定有效目录时，文件将保存到这里。修改后点击“保存设置”生效。</p></div>
             <div class="settings-actions"><button type="submit" class="button primary">保存设置</button><button id="reset-settings" type="button" class="button secondary">恢复默认</button><span id="settings-save-state" class="muted" role="status"></span></div>
           </form>
-          <div class="settings-card data-card"><h2>本地数据</h2><p class="muted">快捷方式、便签、剪贴板历史、设置和下载记录保存在此设备。下载文件保存在各任务指定的目录。</p><code id="data-path" class="data-path">正在读取…</code><button id="open-data-directory" class="button secondary">打开数据目录 ↗</button></div>
+          <div class="settings-card data-card"><h2>本地数据</h2><p class="muted">快捷方式、便签、表情库、剪贴板历史、设置和下载记录保存在此设备。表情图片与下载文件保存在各自的原位置。</p><code id="data-path" class="data-path">正在读取…</code><button id="open-data-directory" class="button secondary">打开数据目录 ↗</button></div>
         </section>
       </div>
     </main>
@@ -122,5 +133,6 @@
     </form>
   </dialog>
   <dialog id="clipboard-dialog" class="app-dialog clipboard-dialog" aria-labelledby="clipboard-dialog-title"><div class="dialog-heading"><h2 id="clipboard-dialog-title">剪贴板详情</h2><button id="clipboard-dialog-close" class="icon-button" aria-label="关闭剪贴板详情">×</button></div><div id="clipboard-dialog-body"></div><div class="dialog-actions"><button id="clipboard-dialog-cancel" class="button secondary">关闭</button><button id="clipboard-dialog-confirm" class="button danger primary" hidden>确认删除</button></div><p id="clipboard-dialog-error" class="field-error" role="alert" hidden></p></dialog>
+  <dialog id="emoji-dialog" class="app-dialog" aria-labelledby="emoji-dialog-title"><form id="emoji-dialog-form"><div class="dialog-heading"><h2 id="emoji-dialog-title">表情</h2><button id="emoji-dialog-close" type="button" class="icon-button" aria-label="关闭表情对话框">×</button></div><div id="emoji-dialog-body"></div><p id="emoji-dialog-error" class="field-error" role="alert" hidden></p><div class="dialog-actions"><button id="emoji-dialog-cancel" type="button" class="button secondary">取消</button><button id="emoji-dialog-confirm" type="submit" class="button primary">保存</button></div></form></dialog>
 </body>
 </html>

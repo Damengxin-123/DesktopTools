@@ -20,6 +20,7 @@ add_library(DesktopToolCore STATIC
     src/services/NoteService.h src/services/NoteService.cpp
     src/services/SettingsService.h src/services/SettingsService.cpp
     src/services/ClipboardService.h src/services/ClipboardService.cpp
+    src/services/EmojiService.h src/services/EmojiService.cpp
     src/services/DownloadService.h src/services/DownloadService.cpp
     src/services/TorrentService.h src/services/TorrentService.cpp
     src/app/GlobalHotkey.h src/app/GlobalHotkey.cpp
@@ -60,6 +61,10 @@ if(BUILD_TESTING)
     target_link_libraries(ClipboardServiceTest PRIVATE DesktopToolCore Qt6::Test)
     add_test(NAME clipboard-service COMMAND ClipboardServiceTest)
     set_tests_properties(clipboard-service PROPERTIES TIMEOUT 60 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    add_executable(EmojiServiceTest tests/EmojiServiceTest.cpp)
+    target_link_libraries(EmojiServiceTest PRIVATE DesktopToolCore Qt6::Test)
+    add_test(NAME emoji-service COMMAND EmojiServiceTest)
+    set_tests_properties(emoji-service PROPERTIES TIMEOUT 60 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     add_executable(CatalogServiceTest tests/CatalogServiceTest.cpp)
     target_link_libraries(CatalogServiceTest PRIVATE DesktopToolCore)
     add_test(NAME catalog-services COMMAND CatalogServiceTest)

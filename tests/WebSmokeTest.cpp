@@ -2,10 +2,12 @@
 #include "app/GlobalHotkey.h"
 #include "bridge/AppBridge.h"
 #include "services/ClipboardService.h"
+#include "services/EmojiService.h"
 #include "DownloadPageServer.h"
 #include "TorrentTestPeer.h"
 
 #include <QApplication>
+#include <QClipboard>
 #include <QElapsedTimer>
 #include <QDir>
 #include <QEventLoop>
@@ -42,6 +44,10 @@ private slots:
     void clipboardThroughPage();
     // 剪贴板索引损坏时保留原文件，其他页面继续可用。
     void damagedClipboardHistoryIsIsolated();
+    // 验证表情页卡片、关键字搜索、分类筛选、编辑、复制文件与删除。
+    void emojiThroughPage();
+    // 表情库损坏时仅禁用表情操作，其他页面继续可用。
+    void damagedEmojiLibraryIsIsolated();
 private:
     // 同步等待一次短 JavaScript 求值，带超时防止测试挂起。
     static QVariant evaluate(QWebEnginePage* page, const QString& source);
@@ -385,6 +391,89 @@ void WebSmokeTest::damagedClipboardHistoryIsIsolated()
     QVERIFY(evaluate(page, QStringLiteral("!document.querySelector('#clipboard-error').hidden && document.querySelector('#clipboard-types').disabled && !document.querySelector('#workspace').inert")).toBool());
     QVERIFY(history.open(QIODevice::ReadOnly));
     QCOMPARE(history.readAll(), QByteArray("{broken"));
+}
+
+void WebSmokeTest::emojiThroughPage()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QDir images(directory.filePath(QStringLiteral("stickers")));
+    QVERIFY(QDir().mkpath(images.absolutePath()));
+    QImage first(64, 48, QImage::Format_RGB32);
+    first.fill(QColor("#f2b04e"));
+    const QString firstPath = images.filePath(QStringLiteral("笑脸.png"));
+    QVERIFY(first.save(firstPath, "PNG"));
+    QImage second(80, 80, QImage::Format_RGB32);
+    second.fill(QColor("#6385ee"));
+    const QString secondPath = images.filePath(QStringLiteral("蓝星.png"));
+    QVERIFY(second.save(secondPath, "PNG"));
+    WebWindow window(directory.path(), false);
+    window.show();
+    auto* page = window.webView()->page();
+    auto* clipboardService = window.findChild<ClipboardService*>();
+    QVERIFY(clipboardService);
+    auto* emojiService = window.findChild<EmojiService*>();
+    QVERIFY(emojiService);
+    QTRY_VERIFY_WITH_TIMEOUT(evaluate(page, QStringLiteral("document.documentElement && document.documentElement.dataset.ready === 'true'")).toBool(), 20000);
+    // 通过真实桥接服务添加表情，页面依靠变更信号刷新。
+    QVERIFY(emojiService->add({{QStringLiteral("path"), firstPath}, {QStringLiteral("categoryId"), QStringLiteral("default")},
+        {QStringLiteral("keywords"), QVariantList{QStringLiteral("开心"), QStringLiteral("笑脸")}}}).value("ok").toBool());
+    QVERIFY(emojiService->add({{QStringLiteral("path"), secondPath}, {QStringLiteral("categoryId"), QStringLiteral("default")},
+        {QStringLiteral("keywords"), QVariantList{QStringLiteral("蓝星")}}}).value("ok").toBool());
+    QString firstId;
+    QString secondId;
+    for (const auto& value : emojiService->snapshot().value("data").toMap().value("items").toList()) {
+        const auto item = value.toMap();
+        if (item.value("name").toString() == QStringLiteral("笑脸.png"))
+            firstId = item.value("id").toString();
+        if (item.value("name").toString() == QStringLiteral("蓝星.png"))
+            secondId = item.value("id").toString();
+    }
+    QVERIFY(!firstId.isEmpty() && !secondId.isEmpty());
+    QVERIFY(clipboardService->setTypes({"files", "image"}).value("ok").toBool());
+    const QJsonObject fixture{{QStringLiteral("firstId"), firstId}, {QStringLiteral("secondId"), secondId}};
+    evaluate(page, QStringLiteral("window.__emojiFixture = ")
+        + QString::fromUtf8(QJsonDocument(fixture).toJson(QJsonDocument::Compact)) + QStringLiteral("; true"));
+    QFile script(QStringLiteral(":/tests/emoji-smoke.js"));
+    QVERIFY(script.open(QIODevice::ReadOnly));
+    evaluate(page, QString::fromUtf8(script.readAll()));
+    QTRY_VERIFY_WITH_TIMEOUT(!evaluate(page, QStringLiteral("window.__emojiResult || null")).toMap().isEmpty(), 20000);
+    const auto result = evaluate(page, QStringLiteral("window.__emojiResult")).toMap();
+    QVERIFY2(result.value("ok").toBool(), qPrintable(result.value("error").toString()));
+    // 复制文件同时提供文件引用与图像内容，但没有记录进剪贴板历史。
+    QTest::qWait(120);
+    const auto* mime = QGuiApplication::clipboard()->mimeData();
+    QVERIFY(mime && mime->hasUrls() && mime->hasImage());
+    QCOMPARE(mime->urls().first(), QUrl::fromLocalFile(firstPath));
+    QVERIFY(clipboardService->snapshot().value("data").toMap().value("items").toList().isEmpty());
+    // 删除表情只移除记录，原文件仍然保留。
+    QVERIFY(QFileInfo::exists(firstPath) && QFileInfo::exists(secondPath));
+    const QString capturePath = qEnvironmentVariable("DESKTOPTOOL_EMOJI_CAPTURE");
+    if (!capturePath.isEmpty()) {
+        window.resize(1180, 860);
+        QTest::qWait(400);
+        QVERIFY(window.grab().save(capturePath));
+        window.resize(1180, 780);
+    }
+}
+
+void WebSmokeTest::damagedEmojiLibraryIsIsolated()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString library = directory.filePath(QStringLiteral("emoji/emoji-library.v1.json"));
+    QVERIFY(QDir().mkpath(QFileInfo(library).absolutePath()));
+    QFile libraryFile(library);
+    QVERIFY(libraryFile.open(QIODevice::WriteOnly));
+    libraryFile.write("{broken");
+    libraryFile.close();
+    WebWindow window(directory.path(), false);
+    window.show();
+    auto* page = window.webView()->page();
+    QTRY_VERIFY_WITH_TIMEOUT(evaluate(page, QStringLiteral("document.documentElement && document.documentElement.dataset.ready === 'true'")).toBool(), 20000);
+    QVERIFY(evaluate(page, QStringLiteral("!document.querySelector('#emoji-error').hidden && document.querySelector('#emoji-error').textContent.length > 0 && !document.querySelector('#workspace').inert")).toBool());
+    QVERIFY(libraryFile.open(QIODevice::ReadOnly));
+    QCOMPARE(libraryFile.readAll(), QByteArray("{broken"));
 }
 
 // 初始化测试用 Qt 应用；不会启用托盘、系统热键或单实例服务。

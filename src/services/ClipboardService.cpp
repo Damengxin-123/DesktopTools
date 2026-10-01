@@ -473,6 +473,28 @@ QVariantMap ClipboardService::copy(const QString& id)
     return ServiceResult::success();
 }
 
+QVariantMap ClipboardService::copyExternalFile(const QString& path)
+{
+    const QFileInfo file(path);
+    if (!file.isFile() || !file.exists())
+        return ServiceResult::failure(QStringLiteral("原文件已不存在，无法复制：") + QDir::toNativeSeparators(path));
+    // 可解码时同时提供图像内容，聊天工具可以直接粘贴图片；无法解码仍按文件引用复制。
+    QImageReader reader(file.absoluteFilePath());
+    reader.setDecideFormatFromContent(true);
+    const QImage image = readBoundedImage(reader);
+    QScopedValueRollback<bool> restoring(m_restoring, true);
+    auto* mime = new QMimeData;
+    mime->setUrls({QUrl::fromLocalFile(file.absoluteFilePath())});
+    if (!image.isNull())
+        mime->setImageData(image);
+    mime->setText(QDir::toNativeSeparators(file.absoluteFilePath()));
+    mime->setData(RestoreMime, m_restoreToken);
+    // 外部文件复制也是一次明确的剪贴板操作，之后的其他应用复制应重新计数。
+    m_lastCaptureTime.invalidate();
+    QGuiApplication::clipboard()->setMimeData(mime);
+    return ServiceResult::success();
+}
+
 QVariantMap ClipboardService::pin(const QString& id, bool pinned)
 {
     const auto index = position(id);

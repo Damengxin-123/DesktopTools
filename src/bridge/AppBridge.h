@@ -7,6 +7,7 @@
 class GlobalHotkey;
 class DownloadService;
 class ClipboardService;
+class EmojiService;
 class NoteService;
 class SettingsService;
 class ShortcutService;
@@ -53,6 +54,24 @@ public:
     Q_INVOKABLE QVariantMap clearClipboardHistory();
     // 打开指定文件引用的所在目录。
     Q_INVOKABLE QVariantMap openClipboardDirectory(const QString& id, int fileIndex);
+    // 返回表情分类和列表，可按文件名与检索关键字过滤。
+    Q_INVOKABLE QVariantMap getEmojis(const QString& query) const;
+    // 显示原生图片选择器，返回路径和是否取消的标志。
+    Q_INVOKABLE QVariantMap chooseEmojiImage();
+    // 添加本地表情图片并设置检索关键字。
+    Q_INVOKABLE QVariantMap addEmoji(const QVariantMap& item);
+    // 修改表情的检索关键字和所属分类。
+    Q_INVOKABLE QVariantMap saveEmoji(const QVariantMap& item);
+    // 批量删除表情记录，保留原文件。
+    Q_INVOKABLE QVariantMap deleteEmojis(const QStringList& ids);
+    // 新增或重命名表情分类。
+    Q_INVOKABLE QVariantMap saveEmojiCategory(const QString& id, const QString& name);
+    // 删除表情分类，其中的表情移入默认分类。
+    Q_INVOKABLE QVariantMap deleteEmojiCategory(const QString& id);
+    // 打开表情原文件所在目录并选中该文件。
+    Q_INVOKABLE QVariantMap openEmojiDirectory(const QString& id);
+    // 复制表情原文件到剪贴板，不记录到剪贴板历史。
+    Q_INVOKABLE QVariantMap copyEmojiFile(const QString& id);
     // 返回便签列表与分类。
     Q_INVOKABLE QVariantMap getNotes() const;
     // 读取指定便签的安全 HTML 内容。
@@ -110,6 +129,8 @@ signals:
     void downloadsChanged();
     // 剪贴板历史、监听设置或保存提示已变化。
     void clipboardChanged();
+    // 表情库或分类已持久化。
+    void emojisChanged();
     // 热键请求唤醒主窗口。
     void activateWindowRequested();
 private:
@@ -127,6 +148,8 @@ private:
     DownloadService* m_downloads;
     // 剪贴板监听和持久化服务。
     ClipboardService* m_clipboard;
+    // 表情分类和检索服务。
+    EmojiService* m_emoji;
     // 全局热键注册器。
     GlobalHotkey* m_hotkey;
     // 启动时热键注册失败的说明。

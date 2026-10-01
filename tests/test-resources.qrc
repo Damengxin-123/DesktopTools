@@ -4,5 +4,6 @@
     <file>download-smoke.js</file>
     <file>magnet-smoke.js</file>
     <file>clipboard-smoke.js</file>
+    <file>emoji-smoke.js</file>
   </qresource>
 </RCC>

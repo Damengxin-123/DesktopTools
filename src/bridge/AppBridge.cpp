@@ -3,6 +3,7 @@
 #include "app/GlobalHotkey.h"
 #include "services/DownloadService.h"
 #include "services/ClipboardService.h"
+#include "services/EmojiService.h"
 #include "services/NoteService.h"
 #include "services/ServiceResult.h"
 #include "services/SettingsService.h"
@@ -13,6 +14,7 @@
 #include <QDir>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QImageReader>
 #include <QJsonValue>
 #include <QSettings>
 #include <QUrl>
@@ -42,6 +44,7 @@ AppBridge::AppBridge(const QString& dataRoot, QWidget* window, bool nativeIntegr
       m_settings(new SettingsService(m_dataRoot, this, startupSettings(nativeIntegration, this))),
       m_downloads(new DownloadService(m_dataRoot, this)),
       m_clipboard(new ClipboardService(m_dataRoot, nativeIntegration, this)),
+      m_emoji(new EmojiService(m_dataRoot, m_clipboard, this)),
       m_hotkey(new GlobalHotkey(nativeIntegration, this))
 {
     connect(m_shortcuts, &ShortcutService::changed, this, &AppBridge::shortcutsChanged);
@@ -49,6 +52,7 @@ AppBridge::AppBridge(const QString& dataRoot, QWidget* window, bool nativeIntegr
     connect(m_settings, &SettingsService::changed, this, &AppBridge::settingsChanged);
     connect(m_downloads, &DownloadService::changed, this, &AppBridge::downloadsChanged);
     connect(m_clipboard, &ClipboardService::changed, this, &AppBridge::clipboardChanged);
+    connect(m_emoji, &EmojiService::changed, this, &AppBridge::emojisChanged);
     connect(m_hotkey, &GlobalHotkey::activated, this, &AppBridge::activateWindowRequested);
     const auto result = m_settings->snapshot();
     if (result.value("ok").toBool()) {
@@ -98,6 +102,29 @@ QVariantMap AppBridge::deleteClipboardItems(const QStringList& ids) { return m_c
 QVariantMap AppBridge::clearClipboardHistory() { return m_clipboard->clear(); }
 QVariantMap AppBridge::openClipboardDirectory(const QString& id, int fileIndex)
 { return m_clipboard->openDirectory(id, fileIndex); }
+
+QVariantMap AppBridge::getEmojis(const QString& query) const { return m_emoji->snapshot(query); }
+
+QVariantMap AppBridge::chooseEmojiImage()
+{
+    QStringList patterns;
+    for (const auto& format : QImageReader::supportedImageFormats())
+        patterns.append(QStringLiteral("*.") + QString::fromLatin1(format));
+    const QString path = QFileDialog::getOpenFileName(m_window, QStringLiteral("选择表情图片"), QString(),
+        QStringLiteral("图片文件 (%1)").arg(patterns.join(QLatin1Char(' '))));
+    if (path.isEmpty())
+        return ServiceResult::success(QVariantMap{{"cancelled", true}});
+    return ServiceResult::success(QVariantMap{{"target", path}, {"title", QFileInfo(path).fileName()}});
+}
+
+QVariantMap AppBridge::addEmoji(const QVariantMap& item) { return m_emoji->add(item); }
+QVariantMap AppBridge::saveEmoji(const QVariantMap& item) { return m_emoji->save(item); }
+QVariantMap AppBridge::deleteEmojis(const QStringList& ids) { return m_emoji->remove(ids); }
+QVariantMap AppBridge::saveEmojiCategory(const QString& id, const QString& name)
+{ return m_emoji->saveCategory(id, name); }
+QVariantMap AppBridge::deleteEmojiCategory(const QString& id) { return m_emoji->removeCategory(id); }
+QVariantMap AppBridge::openEmojiDirectory(const QString& id) { return m_emoji->openDirectory(id); }
+QVariantMap AppBridge::copyEmojiFile(const QString& id) { return m_emoji->copyFile(id); }
 QVariantMap AppBridge::getNote(const QString& id) const { return m_notes->readNote(id); }
 QVariantMap AppBridge::saveNote(const QVariantMap& note) { return m_notes->saveNote(note); }
 QVariantMap AppBridge::deleteNotes(const QStringList& ids) { return m_notes->removeNotes(ids); }
