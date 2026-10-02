@@ -13,6 +13,7 @@
   <script defer src="emoji.js"></script>
   <script defer src="wallpaper.js"></script>
   <script defer src="wallpaper-layout.js"></script>
+  <script defer src="gridmap.js"></script>
   <script defer src="app.js"></script>
 </head>
 <body>
@@ -27,6 +28,7 @@
         <button class="nav-button" data-page="downloads"><span aria-hidden="true">↓</span>下载<span class="nav-count" id="download-count">0</span></button>
         <button class="nav-button" data-page="clipboard"><span aria-hidden="true">▣</span>剪贴板<span class="nav-count" id="clipboard-count">0</span></button>
         <button class="nav-button" data-page="wallpaper"><span aria-hidden="true">❋</span>壁纸<span class="nav-count" id="wallpaper-count">0</span></button>
+<button class="nav-button" data-page="gridmap"><span aria-hidden="true">▦</span>网格图<span class="nav-count" id="gridmap-count">0</span></button>
         <button class="nav-button" data-page="settings"><span aria-hidden="true">⚙</span>设置</button>
       </nav>
       <div class="sidebar-bottom"><span class="status-dot" id="connection-dot"></span><span id="connection-status">正在连接桌面程序…</span><span class="version" id="app-version"></span></div>
@@ -129,6 +131,42 @@
           <div id="wallpaper-list" class="emoji-grid" aria-label="壁纸历史"></div>
           <div id="wallpaper-empty" class="empty-state"><div class="empty-icon" aria-hidden="true">❋</div><h2>还没有壁纸记录</h2><p>点击“选择本地资源”挑选动图或视频，立即设为桌面壁纸。</p></div>
         </section>
+<section class="page gridmap-page" id="page-gridmap" aria-labelledby="gridmap-heading" hidden>
+          <header class="page-header"><div><div class="eyebrow">GRID MAP</div><h1 id="gridmap-heading">网格图</h1><p>以画布中心为原点的栅格示意图，点击格子涂色，可导出或复制为 PNG。</p></div><button id="add-gridmap" class="button primary"><span aria-hidden="true">＋</span>新建网格图</button></header>
+          <div id="gridmap-error" class="notice warning" role="alert" hidden></div>
+          <div class="gridmap-layout">
+            <aside class="gridmap-browser" aria-label="网格图项目">
+              <div id="gridmap-list" class="gridmap-list"></div>
+            </aside>
+            <div class="gridmap-stage">
+              <div id="gridmap-empty" class="empty-state"><div class="empty-icon" aria-hidden="true">▦</div><h2>选择一个网格图</h2><p>双击左侧项目开始编辑，或新建一个网格图。</p></div>
+              <div id="gridmap-editor" class="gridmap-editor" hidden>
+                <div class="gridmap-toolbar" role="toolbar" aria-label="网格图工具">
+                  <span class="gridmap-title" id="gridmap-title"></span>
+                  <span class="toolbar-separator" aria-hidden="true"></span>
+                  <span class="gridmap-tool-label">常用颜色</span>
+                  <span id="gridmap-swatches" class="gridmap-swatches"></span>
+                  <label class="gridmap-color-picker"><span>调色盘</span><input id="gridmap-color" type="color" value="#e02f2f" aria-label="自定义颜色"></label>
+                  <button id="gridmap-eraser" type="button" class="button secondary small" aria-pressed="false">橡皮擦</button>
+                  <span class="toolbar-separator" aria-hidden="true"></span>
+                  <label class="gridmap-color-picker"><span>网格线</span><input id="gridmap-line-color" type="color" value="#94a3b8" aria-label="网格线颜色"></label>
+                  <label class="gridmap-tool-label" for="gridmap-line-width">粗细</label>
+                  <select id="gridmap-line-width" aria-label="网格线粗细"><option value="1">1 px</option><option value="2">2 px</option><option value="3">3 px</option><option value="4">4 px</option><option value="5">5 px</option><option value="6">6 px</option></select>
+                  <span class="toolbar-separator" aria-hidden="true"></span>
+                  <button id="gridmap-undo" type="button" class="button secondary small">↶ 撤销</button>
+                  <button id="gridmap-reset-view" type="button" class="button secondary small">复位视图</button>
+                  <span class="gridmap-toolbar-end">
+                    <button id="gridmap-copy-png" type="button" class="button secondary small">复制 PNG</button>
+                    <button id="gridmap-export" type="button" class="button secondary small">导出 PNG</button>
+                    <button id="gridmap-save" type="button" class="button primary small">保存</button>
+                  </span>
+                </div>
+                <div class="gridmap-canvas-wrap"><canvas id="gridmap-canvas"></canvas></div>
+                <footer class="gridmap-status"><span id="gridmap-pos">坐标 —</span><span id="gridmap-zoom">缩放 100%</span><span id="gridmap-cells">0 格</span><span id="gridmap-save-state" class="muted" role="status">已保存</span><span class="gridmap-hint">左键涂色 · 按住空格框选 · 右键拖动 · 滚轮缩放 · Ctrl+Z 撤销 · Ctrl+S 保存</span></footer>
+              </div>
+            </div>
+          </div>
+        </section>
         <section class="page settings-page" id="page-settings" aria-labelledby="settings-heading" hidden>
           <header class="page-header"><div><div class="eyebrow">PREFERENCES</div><h1 id="settings-heading">设置</h1><p>调整适合自己的工作方式。</p></div></header>
           <form id="settings-form" class="settings-card">
@@ -162,5 +200,6 @@
   <dialog id="clipboard-dialog" class="app-dialog clipboard-dialog" aria-labelledby="clipboard-dialog-title"><div class="dialog-heading"><h2 id="clipboard-dialog-title">剪贴板详情</h2><button id="clipboard-dialog-close" class="icon-button" aria-label="关闭剪贴板详情">×</button></div><div id="clipboard-dialog-body"></div><div class="dialog-actions"><button id="clipboard-dialog-cancel" class="button secondary">关闭</button><button id="clipboard-dialog-confirm" class="button danger primary" hidden>确认删除</button></div><p id="clipboard-dialog-error" class="field-error" role="alert" hidden></p></dialog>
   <dialog id="emoji-dialog" class="app-dialog" aria-labelledby="emoji-dialog-title"><form id="emoji-dialog-form"><div class="dialog-heading"><h2 id="emoji-dialog-title">表情</h2><button id="emoji-dialog-close" type="button" class="icon-button" aria-label="关闭表情对话框">×</button></div><div id="emoji-dialog-body"></div><p id="emoji-dialog-error" class="field-error" role="alert" hidden></p><div class="dialog-actions"><button id="emoji-dialog-cancel" type="button" class="button secondary">取消</button><button id="emoji-dialog-confirm" type="submit" class="button primary">保存</button></div></form></dialog>
   <dialog id="wallpaper-dialog" class="app-dialog" aria-labelledby="wallpaper-dialog-title"><form id="wallpaper-dialog-form"><div class="dialog-heading"><h2 id="wallpaper-dialog-title">动态壁纸</h2><button id="wallpaper-dialog-close" type="button" class="icon-button" aria-label="关闭动态壁纸对话框">×</button></div><div id="wallpaper-dialog-body"></div><p id="wallpaper-dialog-error" class="field-error" role="alert" hidden></p><div class="dialog-actions"><button id="wallpaper-dialog-cancel" type="button" class="button secondary">取消</button><button id="wallpaper-dialog-confirm" type="submit" class="button primary">保存</button></div></form></dialog>
+  <dialog id="gridmap-dialog" class="app-dialog" aria-labelledby="gridmap-dialog-title"><form id="gridmap-dialog-form"><div class="dialog-heading"><h2 id="gridmap-dialog-title">网格图</h2><button id="gridmap-dialog-close" type="button" class="icon-button" aria-label="关闭网格图对话框">×</button></div><div id="gridmap-dialog-body"></div><p id="gridmap-dialog-error" class="field-error" role="alert" hidden></p><div class="dialog-actions"><button id="gridmap-dialog-cancel" type="button" class="button secondary">取消</button><button id="gridmap-dialog-confirm" type="submit" class="button primary">保存</button></div></form></dialog>
 </body>
 </html>

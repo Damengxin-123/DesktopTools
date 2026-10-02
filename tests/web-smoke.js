@@ -147,14 +147,152 @@
     check((await call("getNotes")).items.length === 0, "便签删除失败");
 
 
+    // 网格图：新建、双击打开、涂色、撤销、缩放、拖动、线条设置、保存与删除。
+    element("[data-page='gridmap']").click();
+    await waitFor(() => !element("#page-gridmap").hidden, "网格图页面切换失败");
+    check(element("#gridmap-editor").hidden, "未打开项目时编辑器应隐藏");
+    element("#add-gridmap").click();
+    await waitFor(() => element("#gridmap-dialog").open, "新建网格图对话框未打开");
+    input("#gridmap-name-input", "机房示意");
+    element("#gridmap-dialog-confirm").click();
+    await waitFor(() => !element("#gridmap-editor").hidden, "网格图编辑器没有打开");
+    await waitFor(() => element("#gridmap-count").textContent === "1", "网格图列表未刷新");
+    await waitFor(() => element("#gridmap-zoom").textContent === "缩放 100%", "画布视图未复位");
+
+    const gridCanvas = element("#gridmap-canvas");
+    const gridRect = () => gridCanvas.getBoundingClientRect();
+    // 复位视图后原点在画布中心，每格 24px；dx/dy 为格子坐标。
+    const gridCell = (dx, dy) => {
+      const rect = gridRect();
+      return { clientX: rect.left + rect.width / 2 + (dx + 0.5) * 24, clientY: rect.top + rect.height / 2 + (dy + 0.5) * 24 };
+    };
+    const gridPoint = (x, y) => {
+      const rect = gridRect();
+      return { clientX: rect.left + x, clientY: rect.top + y };
+    };
+    const gridPointer = (type, point, button) => gridCanvas.dispatchEvent(new PointerEvent(type,
+      { bubbles: true, cancelable: true, button, clientX: point.clientX, clientY: point.clientY, pointerId: 7, isPrimary: true }));
+    const gridStroke = (points, button = 0) => {
+      gridPointer("pointerdown", points[0], button);
+      for (let index = 1; index < points.length; ++index) gridPointer("pointermove", points[index], button);
+      gridPointer("pointerup", points[points.length - 1], button);
+    };
+    const gridUndo = () => document.dispatchEvent(new KeyboardEvent("keydown",
+      { key: "z", ctrlKey: true, bubbles: true, cancelable: true }));
+
+    // 单击涂色与 Ctrl+Z 撤销。
+    gridStroke([gridCell(1, 0)]);
+    await waitFor(() => element("#gridmap-cells").textContent === "1 格", "涂色没有生效");
+    check(element("#gridmap-save-state").textContent === "未保存的修改", "涂色未标记未保存状态");
+    gridUndo();
+    await waitFor(() => element("#gridmap-cells").textContent === "0 格", "Ctrl+Z 撤销涂色失败");
+
+    // 跨两格拖动涂色，修改网格线设置后一起保存。
+    gridStroke([gridCell(1, 0), gridCell(2, 0)]);
+    await waitFor(() => element("#gridmap-cells").textContent === "2 格", "拖动涂色没有覆盖经过的格子");
+    input("#gridmap-line-color", "#123456");
+    input("#gridmap-line-width", "3");
+    element("#gridmap-save").click();
+    const gridId = (await call("getGridMaps")).items[0].id;
+    await waitFor(async () => {
+      const data = await call("getGridMap", gridId);
+      return data.cells.length === 2 && data.lineColor === "#123456" && data.lineWidth === 3;
+    }, "网格图保存不完整");
+    const savedCells = (await call("getGridMap", gridId)).cells;
+    check(savedCells.some(cell => cell[0] === 1 && cell[1] === 0), "原点右侧格子坐标不正确");
+    check(savedCells.some(cell => cell[0] === 2 && cell[1] === 0), "拖动终点格子坐标不正确");
+
+    // 右键拖动把原点向左移两格，中心点击落到 (2, 0)，随后撤销。
+    const dragStart = gridCell(0, 0);
+    gridStroke([{ clientX: dragStart.clientX, clientY: dragStart.clientY },
+      gridPoint(-48, 0), gridPoint(-48, 0)], 2);
+    gridStroke([gridCell(0, 0)]);
+    await waitFor(() => element("#gridmap-cells").textContent === "3 格", "拖动画布后涂色位置错误");
+    gridUndo();
+    await waitFor(() => element("#gridmap-cells").textContent === "2 格", "画布拖动后的撤销失败");
+
+    // 复位视图让坐标确定，再验证空格框选与橡皮擦。
+    element("#gridmap-reset-view").click();
+    await pause();
+
+    // 按住空格拖动框选 2x2 区域一次填充 4 格，Ctrl+Z 一步全部撤销。
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true, cancelable: true }));
+    gridStroke([gridCell(0, 1), gridCell(1, 2)]);
+    document.dispatchEvent(new KeyboardEvent("keyup", { key: " ", bubbles: true }));
+    await waitFor(() => element("#gridmap-cells").textContent === "6 格", "空格框选没有填充区域");
+    gridUndo();
+    await waitFor(() => element("#gridmap-cells").textContent === "2 格", "框选填充未能一次撤销");
+
+    // 橡皮擦：选中状态可见，开启后清除格子，取消后恢复涂色。
+    element("#gridmap-eraser").click();
+    check(element("#gridmap-eraser").getAttribute("aria-pressed") === "true", "橡皮擦未标记选中状态");
+    gridStroke([gridCell(1, 0)]);
+    await waitFor(() => element("#gridmap-cells").textContent === "1 格", "橡皮擦没有清除格子");
+    element("#gridmap-eraser").click();
+    check(element("#gridmap-eraser").getAttribute("aria-pressed") === "false", "橡皮擦未取消选中状态");
+    gridStroke([gridCell(1, 0)]);
+    await waitFor(() => element("#gridmap-cells").textContent === "2 格", "取消橡皮擦后未能恢复涂色");
+
+    // 滚轮以光标为锚缩放。
+    const wheelPoint = gridPoint(10, 10);
+    gridCanvas.dispatchEvent(new WheelEvent("wheel",
+      { bubbles: true, cancelable: true, deltaY: -120, clientX: wheelPoint.clientX, clientY: wheelPoint.clientY }));
+    await waitFor(() => element("#gridmap-zoom").textContent === "缩放 115%", "滚轮缩放未生效");
+
+    // 有未保存修改时切换页面必须确认；确认放弃后才放行。
+    gridStroke([gridCell(-1, 0)]);
+    await waitFor(() => element("#gridmap-cells").textContent === "3 格", "再次涂色失败");
+    const originalGridConfirm = window.confirm;
+    window.confirm = () => false;
+    element("[data-page='settings']").click();
+    check(!element("#page-gridmap").hidden, "未确认放弃修改时不应离开网格图页");
+    window.confirm = () => true;
+    element("[data-page='settings']").click();
+    await waitFor(() => !element("#page-settings").hidden, "确认后未能离开网格图页");
+    window.confirm = originalGridConfirm;
+    element("[data-page='gridmap']").click();
+    await waitFor(() => !element("#page-gridmap").hidden, "返回网格图页失败");
+
+    // 重命名当前项目并从列表刷新。
+    document.querySelectorAll(".gridmap-row .icon-button")[0].click();
+    await waitFor(() => element("#gridmap-dialog").open, "重命名对话框未打开");
+    input("#gridmap-name-input", "机房布置图");
+    element("#gridmap-dialog-confirm").click();
+    await waitFor(() => element(".gridmap-row-title").textContent === "机房布置图", "重命名未刷新列表");
+
+    // 删除当前项目：编辑器关闭，后端记录清空。
+    document.querySelectorAll(".gridmap-row .icon-button")[1].click();
+    await waitFor(() => element("#gridmap-dialog").open, "删除对话框未打开");
+    element("#gridmap-dialog-confirm").click();
+    await waitFor(() => element("#gridmap-count").textContent === "0", "网格图未删除");
+    await waitFor(() => element("#gridmap-editor").hidden, "删除当前项目后编辑器未关闭");
+    check((await call("getGridMaps")).items.length === 0, "网格图记录未删除");
+
+    // 桥接新建后双击列表项进入编辑。
+    await call("createGridMap", "双击打开");
+    await waitFor(() => element("#gridmap-count").textContent === "1", "桥接新建未刷新列表");
+    element(".gridmap-row").dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+    await waitFor(() => !element("#gridmap-editor").hidden, "双击未能打开编辑器");
+    check(element("#gridmap-title").textContent === "双击打开", "双击打开的项目不正确");
+    document.querySelectorAll(".gridmap-row .icon-button")[1].click();
+    await waitFor(() => element("#gridmap-dialog").open, "清理删除对话框未打开");
+    element("#gridmap-dialog-confirm").click();
+    await waitFor(() => element("#gridmap-count").textContent === "0", "清理网格图未删除");
+
     // 为离屏渲染截图提供临时示例数据，不写入用户数据目录。
     const work = await call("saveShortcutCategory", "", "工作常用");
     await call("saveShortcut", { title: "Qt 开发文档", target: "https://doc.qt.io/qt-6/", type: 1, categoryId: work.id });
     await call("saveShortcut", { title: "项目资料", target: "C:/Projects", type: 0, categoryId: work.id });
     await call("saveShortcut", { title: "灵感与参考", target: "https://www.qt.io/", type: 1, categoryId: "default" });
     await call("saveNote", { title: "今天的想法", categoryId: "default", html: "<h2>让日常井然有序</h2><p>用熟悉的 Qt 处理本地数据，用 HTML 打造界面。</p>" });
+    const sampleGrid = await call("createGridMap", "机房布置示意");
+    const sampleCells = [];
+    for (let x = -3; x <= 3; ++x) { sampleCells.push([x, -2, "#e02f2f"]); sampleCells.push([x, 2, "#e02f2f"]); }
+    for (let y = -1; y <= 1; ++y) { sampleCells.push([-3, y, "#e02f2f"]); sampleCells.push([3, y, "#e02f2f"]); }
+    sampleCells.push([-1, 0, "#f08c1c"], [0, 0, "#f08c1c"], [1, 0, "#f08c1c"]);
+    await call("saveGridMap", sampleGrid.id, { lineColor: "#94a3b8", lineWidth: 1, cells: sampleCells });
     element("[data-page='shortcuts']").click();
-    window.__smokeResult = { ok: true, summary: "网页 CRUD、信号刷新、分类排序、错误回传、便签图片、退出保护、设置表单全部通过。" };
+    window.__smokeResult = { ok: true, summary: "网页 CRUD、信号刷新、分类排序、错误回传、便签图片、退出保护、设置表单与网格图画板全部通过。" };
   } catch (error) {
     window.__smokeResult = { ok: false, error: error.stack || error.message || String(error) };
   }

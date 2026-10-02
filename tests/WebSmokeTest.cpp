@@ -158,6 +158,26 @@ void WebSmokeTest::htmlAndBackend()
         evaluate(page, QStringLiteral("document.querySelector('[data-page=settings]').click(); document.querySelector('.about-card').scrollIntoView(); true"));
         QTest::qWait(200);
         QVERIFY(window.grab().save(capturePath + ".settings.png"));
+        evaluate(page, QStringLiteral("document.querySelector('[data-page=gridmap]').click(); true"));
+        QTest::qWait(400);
+        evaluate(page, QStringLiteral("const row = document.querySelector('.gridmap-row'); row && row.dispatchEvent(new MouseEvent('dblclick', { bubbles: true })); true"));
+        QTest::qWait(500);
+        QVERIFY(window.grab().save(capturePath + ".gridmap.png"));
+        // 橡皮擦选中态与空格框选预览各截一张，便于人工检查工具状态。
+        evaluate(page, QStringLiteral("document.querySelector('#gridmap-eraser').click(); true"));
+        QTest::qWait(200);
+        QVERIFY(window.grab().save(capturePath + ".gridmap-eraser.png"));
+        evaluate(page, QStringLiteral("document.querySelector('#gridmap-eraser').click();"
+            "document.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }));"
+            "const c = document.querySelector('#gridmap-canvas'); const r = c.getBoundingClientRect();"
+            "const opts = (x, y) => ({ bubbles: true, cancelable: true, button: 0, clientX: r.left + r.width / 2 + x, clientY: r.top + r.height / 2 + y, pointerId: 9 });"
+            "c.dispatchEvent(new PointerEvent('pointerdown', opts(-60, -40)));"
+            "c.dispatchEvent(new PointerEvent('pointermove', opts(80, 40))); true"));
+        QTest::qWait(300);
+        QVERIFY(window.grab().save(capturePath + ".gridmap-box.png"));
+        evaluate(page, QStringLiteral("document.dispatchEvent(new KeyboardEvent('keyup', { key: ' ', bubbles: true }));"
+            "document.querySelector('#gridmap-canvas').dispatchEvent(new PointerEvent('pointerup', { bubbles: true, button: 0, pointerId: 9 })); true"));
+        QTest::qWait(200);
     }
 }
 

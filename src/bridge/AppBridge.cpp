@@ -9,6 +9,7 @@
 #include "services/SettingsService.h"
 #include "services/ShortcutService.h"
 #include "services/WallpaperService.h"
+#include "services/GridMapService.h"
 #include <QApplication>
 #include <QClipboard>
 #include <QDesktopServices>
@@ -17,12 +18,34 @@
 #include <QFileInfo>
 #include <QImageReader>
 #include <QJsonValue>
+#include <QSaveFile>
 #include <QSettings>
+#include <QStandardPaths>
 #include <QUrl>
 #include <QWidget>
 
 namespace
 {
+// 网格图导出数据允许的最大 base64 长度。
+constexpr qint64 MaximumGridPngChars = 96 * 1024 * 1024;
+
+// 把网页提交的 PNG 数据地址转换为图像；格式或大小不符时返回空图像。
+QImage decodeGridPng(const QString& imageDataUrl)
+{
+    if (imageDataUrl.size() > MaximumGridPngChars)
+        return QImage();
+    const QString prefix = QStringLiteral("data:image/png;base64,");
+    if (!imageDataUrl.startsWith(prefix, Qt::CaseInsensitive))
+        return QImage();
+    const QByteArray bytes = QByteArray::fromBase64(imageDataUrl.mid(prefix.size()).toLatin1());
+    if (bytes.isEmpty())
+        return QImage();
+    QImage image;
+    if (!image.loadFromData(bytes, "PNG"))
+        return QImage();
+    return image;
+}
+
 // 只为正式运行连接当前用户的 Windows 自启注册表；测试不接触系统启动项。
 QSettings* startupSettings(bool nativeIntegration, QObject* owner)
 {
@@ -47,6 +70,7 @@ AppBridge::AppBridge(const QString& dataRoot, QWidget* window, bool nativeIntegr
       m_clipboard(new ClipboardService(m_dataRoot, nativeIntegration, this)),
       m_emoji(new EmojiService(m_dataRoot, m_clipboard, this)),
       m_wallpaper(new WallpaperService(m_dataRoot, nativeIntegration, this)),
+      m_gridmaps(new GridMapService(m_dataRoot, this)),
       m_hotkey(new GlobalHotkey(nativeIntegration, this))
 {
     connect(m_shortcuts, &ShortcutService::changed, this, &AppBridge::shortcutsChanged);
@@ -56,6 +80,7 @@ AppBridge::AppBridge(const QString& dataRoot, QWidget* window, bool nativeIntegr
     connect(m_clipboard, &ClipboardService::changed, this, &AppBridge::clipboardChanged);
     connect(m_emoji, &EmojiService::changed, this, &AppBridge::emojisChanged);
     connect(m_wallpaper, &WallpaperService::changed, this, &AppBridge::wallpaperChanged);
+    connect(m_gridmaps, &GridMapService::changed, this, &AppBridge::gridMapsChanged);
     connect(m_hotkey, &GlobalHotkey::activated, this, &AppBridge::activateWindowRequested);
     const auto result = m_settings->snapshot();
     if (result.value("ok").toBool()) {
@@ -164,6 +189,49 @@ QVariantMap AppBridge::pasteWallpaperResource()
 {
     return m_clipboard->pasteResource(QDir(m_dataRoot).absoluteFilePath(QStringLiteral("wallpaper/clipboard")));
 }
+QVariantMap AppBridge::getGridMaps() const { return m_gridmaps->snapshot(); }
+QVariantMap AppBridge::createGridMap(const QString& title) { return m_gridmaps->create(title); }
+QVariantMap AppBridge::renameGridMap(const QString& id, const QString& title) { return m_gridmaps->rename(id, title); }
+QVariantMap AppBridge::deleteGridMap(const QStringList& ids) { return m_gridmaps->remove(ids); }
+QVariantMap AppBridge::getGridMap(const QString& id) const { return m_gridmaps->read(id); }
+QVariantMap AppBridge::saveGridMap(const QString& id, const QVariantMap& data) { return m_gridmaps->save(id, data); }
+
+// 把网页渲染的网格图 PNG 保存到用户选择的位置。
+QVariantMap AppBridge::exportGridMapPng(const QString& title, const QString& imageDataUrl)
+{
+    const QImage image = decodeGridPng(imageDataUrl);
+    if (image.isNull())
+        return ServiceResult::failure(QStringLiteral("网格图导出数据无效或过大，请重试。"));
+    QString name = title.trimmed();
+    for (const QChar character : QStringLiteral("\\/:*?\"<>|"))
+        name.remove(character);
+    if (name.isEmpty())
+        name = QStringLiteral("网格图");
+    const QString pictures = QStandardPaths::writableLocation(QStandardPaths::PicturesLocation);
+    const QString suggested = QDir(pictures.isEmpty() ? m_dataRoot : pictures)
+                                  .filePath(name + QStringLiteral(".png"));
+    QString path = QFileDialog::getSaveFileName(m_window, QStringLiteral("导出网格图 PNG"),
+        suggested, QStringLiteral("PNG 图片 (*.png)"));
+    if (path.isEmpty())
+        return ServiceResult::success(QVariantMap{{"cancelled", true}});
+    if (!path.endsWith(QStringLiteral(".png"), Qt::CaseInsensitive))
+        path += QStringLiteral(".png");
+    QSaveFile file(path);
+    if (!file.open(QIODevice::WriteOnly) || !image.save(&file, "PNG") || !file.commit())
+        return ServiceResult::failure(QStringLiteral("无法保存 PNG 文件：") + file.errorString());
+    return ServiceResult::success(QVariantMap{{QStringLiteral("target"), path}});
+}
+
+// 把网页渲染的网格图 PNG 复制到系统剪贴板。
+QVariantMap AppBridge::copyGridMapPng(const QString& imageDataUrl)
+{
+    const QImage image = decodeGridPng(imageDataUrl);
+    if (image.isNull())
+        return ServiceResult::failure(QStringLiteral("网格图导出数据无效或过大，请重试。"));
+    QApplication::clipboard()->setImage(image);
+    return ServiceResult::success();
+}
+
 QVariantMap AppBridge::getNote(const QString& id) const { return m_notes->readNote(id); }
 QVariantMap AppBridge::saveNote(const QVariantMap& note) { return m_notes->saveNote(note); }
 QVariantMap AppBridge::deleteNotes(const QStringList& ids) { return m_notes->removeNotes(ids); }

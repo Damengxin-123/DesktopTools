@@ -24,6 +24,7 @@ add_library(DesktopToolCore STATIC
     src/services/DownloadService.h src/services/DownloadService.cpp
     src/services/TorrentService.h src/services/TorrentService.cpp
     src/services/WallpaperService.h src/services/WallpaperService.cpp
+    src/services/GridMapService.h src/services/GridMapService.cpp
     src/app/GlobalHotkey.h src/app/GlobalHotkey.cpp
     src/app/WallpaperWindow.h src/app/WallpaperWindow.cpp
     src/app/WebWindow.h src/app/WebWindow.cpp
@@ -71,6 +72,10 @@ if(BUILD_TESTING)
     target_link_libraries(WallpaperServiceTest PRIVATE DesktopToolCore Qt6::Test)
     add_test(NAME wallpaper-service COMMAND WallpaperServiceTest)
     set_tests_properties(wallpaper-service PROPERTIES TIMEOUT 60 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    add_executable(GridMapServiceTest tests/GridMapServiceTest.cpp)
+    target_link_libraries(GridMapServiceTest PRIVATE DesktopToolCore Qt6::Test)
+    add_test(NAME gridmap-service COMMAND GridMapServiceTest)
+    set_tests_properties(gridmap-service PROPERTIES TIMEOUT 60 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     add_executable(WallpaperVideoTest tests/WallpaperVideoTest.cpp resources/app.qrc)
     target_link_libraries(WallpaperVideoTest PRIVATE DesktopToolCore Qt6::Test)
     target_compile_definitions(WallpaperVideoTest PRIVATE TEST_VIDEO_FILE="${CMAKE_CURRENT_SOURCE_DIR}/tests/media/wallpaper-h264.mp4")

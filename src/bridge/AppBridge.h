@@ -12,6 +12,7 @@ class NoteService;
 class SettingsService;
 class ShortcutService;
 class WallpaperService;
+class GridMapService;
 class QWidget;
 
 // HTML 页面的唯一原生接口，转发业务操作并处理系统交互。
@@ -77,6 +78,22 @@ public:
     Q_INVOKABLE QVariantMap copyEmojiFile(const QString& id);
     // 返回动态壁纸开关状态和历史记录。
     Q_INVOKABLE QVariantMap getWallpaper() const;
+    // 返回网格图项目列表。
+    Q_INVOKABLE QVariantMap getGridMaps() const;
+    // 新建空白网格图项目。
+    Q_INVOKABLE QVariantMap createGridMap(const QString& title);
+    // 重命名网格图项目。
+    Q_INVOKABLE QVariantMap renameGridMap(const QString& id, const QString& title);
+    // 批量删除网格图项目及其栅格数据。
+    Q_INVOKABLE QVariantMap deleteGridMap(const QStringList& ids);
+    // 读取网格图项目的栅格数据与线条设置。
+    Q_INVOKABLE QVariantMap getGridMap(const QString& id) const;
+    // 保存网格图栅格与线条设置。
+    Q_INVOKABLE QVariantMap saveGridMap(const QString& id, const QVariantMap& data);
+    // 把网页渲染的 PNG 数据保存为本地文件。
+    Q_INVOKABLE QVariantMap exportGridMapPng(const QString& title, const QString& imageDataUrl);
+    // 把网页渲染的 PNG 数据复制到系统剪贴板。
+    Q_INVOKABLE QVariantMap copyGridMapPng(const QString& imageDataUrl);
     // 显示原生媒体选择器，返回路径和是否取消的标志。
     Q_INVOKABLE QVariantMap chooseWallpaperResource();
     // 把当前剪贴板中的图像或复制的单个文件转换为壁纸资源路径。
@@ -160,6 +177,8 @@ signals:
     void emojisChanged();
     // 动态壁纸开关或历史已持久化。
     void wallpaperChanged();
+    // 网格图项目或数据已持久化。
+    void gridMapsChanged();
     // 热键请求唤醒主窗口。
     void activateWindowRequested();
 private:
@@ -181,6 +200,8 @@ private:
     EmojiService* m_emoji;
     // 动态壁纸历史和桌面挂载服务。
     WallpaperService* m_wallpaper;
+    // 网格图项目与栅格数据服务。
+    GridMapService* m_gridmaps;
     // 全局热键注册器。
     GlobalHotkey* m_hotkey;
     // 启动时热键注册失败的说明。
