@@ -23,6 +23,7 @@
     cells: new Map(), // "x,y" → 颜色，只保存被涂色的格子。
     color: COMMON_COLORS[1], // 当前涂色。
     eraser: false, // 橡皮擦模式，涂色改为清除。
+    radius: 0, // 画笔半径：0 为单格，N 为以点击格子为圆心 N 格半径的圆形笔触。
     lineColor: DEFAULT_LINE_COLOR, // 网格线颜色，随项目保存。
     lineWidth: 1, // 网格线粗细，随项目保存。
     zoom: 1, // 缩放系数，格子尺寸 = BASE_SIZE * zoom。
@@ -171,12 +172,19 @@
       ctx.strokeRect(state.panX + bx0 * size + 1, state.panY + by0 * size + 1,
         (bx1 - bx0 + 1) * size - 2, (by1 - by0 + 1) * size - 2);
     }
-    // 悬停格子描边，提示当前涂色位置。
+    // 悬停提示：单格描边，或半径大于 0 时的圆形笔刷范围。
     if (state.hover && !state.box) {
       ctx.strokeStyle = state.eraser ? "#c9535b" : "#315ee7";
       ctx.lineWidth = 2;
-      ctx.strokeRect(state.panX + state.hover[0] * size + 1, state.panY + state.hover[1] * size + 1,
-        size - 2, size - 2);
+      if (state.radius > 0) {
+        ctx.beginPath();
+        ctx.arc(state.panX + (state.hover[0] + 0.5) * size, state.panY + (state.hover[1] + 0.5) * size,
+          (state.radius + 0.5) * size, 0, Math.PI * 2);
+        ctx.stroke();
+      } else {
+        ctx.strokeRect(state.panX + state.hover[0] * size + 1, state.panY + state.hover[1] * size + 1,
+          size - 2, size - 2);
+      }
     }
   }
 
@@ -227,7 +235,25 @@
     changes.push({ x, y, from: before, to: after });
   }
 
-  // Bresenham 直线插值，快速拖动时涂满经过的每个格子。
+  // 以 (cx,cy) 为圆心落下当前画笔：格子中心落在半径加半格的圆内即被涂色，
+  // 因此半径 0 为单格、1 为 3×3、2 为去角的 5×5，整体呈圆形。
+  function stampBrush(cx, cy, changes) {
+    if (state.radius <= 0) {
+      applyCell(cx, cy, changes);
+      return;
+    }
+    const reach = state.radius + 0.5;
+    const squared = reach * reach;
+    for (let x = cx - state.radius; x <= cx + state.radius; ++x) {
+      for (let y = cy - state.radius; y <= cy + state.radius; ++y) {
+        const dx = x - cx;
+        const dy = y - cy;
+        if (dx * dx + dy * dy <= squared) applyCell(x, y, changes);
+      }
+    }
+  }
+
+  // Bresenham 直线插值，快速拖动时笔刷沿途落下，涂满经过的每个格子。
   function paintSpan(from, to, changes) {
     let x0 = from[0];
     let y0 = from[1];
@@ -239,7 +265,7 @@
     const stepY = y0 < y1 ? 1 : -1;
     let error = dx + dy;
     for (;;) {
-      applyCell(x0, y0, changes);
+      stampBrush(x0, y0, changes);
       if (x0 === x1 && y0 === y1) break;
       const doubled = 2 * error;
       if (doubled >= dy) { error += dy; x0 += stepX; }
@@ -696,7 +722,7 @@
         }
         if (state.pan) return;
         const changes = [];
-        applyCell(cell[0], cell[1], changes);
+        stampBrush(cell[0], cell[1], changes);
         state.stroke = { changes, last: cell };
         capturePointer(canvas, event);
         render();
@@ -736,23 +762,25 @@
       }
     });
     const finishPointer = function pointerReleased(event) {
-      if (state.box) {
+      // 先结束状态再应用，避免应用过程中的重绘残留框选高亮。
+      const box = state.box;
+      const stroke = state.stroke;
+      const pan = state.pan;
+      state.box = null;
+      state.stroke = null;
+      state.pan = null;
+      if (box) {
         releasePointer(canvas, event);
-        applyBox(state.box);
-        state.box = null;
+        applyBox(box);
       }
-      if (state.stroke) {
+      if (stroke) {
         releasePointer(canvas, event);
-        if (state.stroke.changes.length) {
-          pushUndo(state.stroke.changes);
+        if (stroke.changes.length) {
+          pushUndo(stroke.changes);
           markDirty();
         }
-        state.stroke = null;
       }
-      if (state.pan) {
-        releasePointer(canvas, event);
-        state.pan = null;
-      }
+      if (pan) releasePointer(canvas, event);
       updateState();
     };
     canvas.addEventListener("pointerup", finishPointer);
@@ -784,6 +812,10 @@
       byId("gridmap-eraser").addEventListener("click", function eraserToggled() {
         state.eraser = !state.eraser;
         byId("gridmap-eraser").setAttribute("aria-pressed", String(state.eraser));
+      });
+      byId("gridmap-brush-radius").addEventListener("change", function brushRadiusChanged(event) {
+        const radius = Number(event.target.value);
+        if (Number.isInteger(radius) && radius >= 0 && radius <= 10) state.radius = radius;
       });
       byId("gridmap-line-color").addEventListener("input", function lineColorChanged(event) {
         state.lineColor = String(event.target.value).toLowerCase();

@@ -254,6 +254,14 @@
       { bubbles: true, button: 0, clientX: emptyPoint.clientX, clientY: emptyPoint.clientY, pointerId: 11 }));
     check(element("#gridmap-color").value === "#e02f2f", "吸取空白格子不应改变当前颜色");
 
+    // 画笔半径：1 时一次涂出 3×3 圆形区域，Ctrl+Z 一步撤销；恢复 0 为单格。
+    input("#gridmap-brush-radius", "1");
+    gridStroke([gridCell(-3, 3)]);
+    await waitFor(() => element("#gridmap-cells").textContent === "11 格", "画笔半径没有涂出圆形区域");
+    gridUndo();
+    await waitFor(() => element("#gridmap-cells").textContent === "2 格", "半径笔刷未能一次撤销");
+    input("#gridmap-brush-radius", "0");
+
     // 滚轮以光标为锚缩放。
     const wheelPoint = gridPoint(10, 10);
     gridCanvas.dispatchEvent(new WheelEvent("wheel",

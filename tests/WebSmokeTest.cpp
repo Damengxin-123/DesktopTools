@@ -178,6 +178,16 @@ void WebSmokeTest::htmlAndBackend()
         evaluate(page, QStringLiteral("document.dispatchEvent(new KeyboardEvent('keyup', { key: ' ', bubbles: true }));"
             "document.querySelector('#gridmap-canvas').dispatchEvent(new PointerEvent('pointerup', { bubbles: true, button: 0, pointerId: 9 })); true"));
         QTest::qWait(200);
+        // 画笔半径：涂出一个圆形色块并悬停显示笔刷范围，便于人工检查。
+        evaluate(page, QStringLiteral("(() => { const radius = document.querySelector('#gridmap-brush-radius'); "
+            "radius.value = '3'; radius.dispatchEvent(new Event('change', { bubbles: true }));"
+            "const c = document.querySelector('#gridmap-canvas'); const r = c.getBoundingClientRect();"
+            "const at = (x, y) => ({ bubbles: true, cancelable: true, button: 0, clientX: r.left + r.width / 2 + x, clientY: r.top + r.height / 2 + y, pointerId: 12 });"
+            "c.dispatchEvent(new PointerEvent('pointerdown', at(-150, -120)));"
+            "c.dispatchEvent(new PointerEvent('pointerup', at(-150, -120)));"
+            "c.dispatchEvent(new PointerEvent('pointermove', at(60, -140))); })(); true"));
+        QTest::qWait(300);
+        QVERIFY(window.grab().save(capturePath + ".gridmap-radius.png"));
     }
 }
 
