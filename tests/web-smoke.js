@@ -233,6 +233,27 @@
     gridStroke([gridCell(1, 0)]);
     await waitFor(() => element("#gridmap-cells").textContent === "2 格", "取消橡皮擦后未能恢复涂色");
 
+    // 当前颜色固定显示在常用颜色区最左侧，并随选色更新。
+    check(element("#gridmap-current").style.backgroundColor === "rgb(224, 47, 47)", "当前颜色未显示在最左侧");
+    element('.gridmap-swatch[title="#2f6fe0"]').click();
+    check(element("#gridmap-color").value === "#2f6fe0", "选择常用颜色失败");
+    check(element("#gridmap-current").style.backgroundColor === "rgb(47, 111, 224)", "当前颜色未随选色更新");
+
+    // Alt+点击吸取格子颜色；空白格子不改变当前颜色。
+    const pickPoint = gridCell(1, 0);
+    gridCanvas.dispatchEvent(new PointerEvent("pointerdown",
+      { bubbles: true, cancelable: true, button: 0, altKey: true, clientX: pickPoint.clientX, clientY: pickPoint.clientY, pointerId: 11 }));
+    gridCanvas.dispatchEvent(new PointerEvent("pointerup",
+      { bubbles: true, button: 0, clientX: pickPoint.clientX, clientY: pickPoint.clientY, pointerId: 11 }));
+    await waitFor(() => element("#gridmap-color").value === "#e02f2f", "Alt 吸色未更新当前颜色");
+    check(element("#gridmap-cells").textContent === "2 格", "吸色不应增减格子");
+    const emptyPoint = gridCell(5, 5);
+    gridCanvas.dispatchEvent(new PointerEvent("pointerdown",
+      { bubbles: true, cancelable: true, button: 0, altKey: true, clientX: emptyPoint.clientX, clientY: emptyPoint.clientY, pointerId: 11 }));
+    gridCanvas.dispatchEvent(new PointerEvent("pointerup",
+      { bubbles: true, button: 0, clientX: emptyPoint.clientX, clientY: emptyPoint.clientY, pointerId: 11 }));
+    check(element("#gridmap-color").value === "#e02f2f", "吸取空白格子不应改变当前颜色");
+
     // 滚轮以光标为锚缩放。
     const wheelPoint = gridPoint(10, 10);
     gridCanvas.dispatchEvent(new WheelEvent("wheel",

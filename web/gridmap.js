@@ -633,7 +633,18 @@
   }
 
   function updateSwatches() {
-    byId("gridmap-swatches").replaceChildren(...COMMON_COLORS.map(function buildSwatch(color) {
+    const container = byId("gridmap-swatches");
+    container.replaceChildren();
+    // 最左侧固定显示当前使用的颜色；点击可从橡皮擦恢复为该颜色涂色。
+    const current = node("button", "gridmap-current");
+    current.type = "button";
+    current.id = "gridmap-current";
+    current.style.backgroundColor = state.color;
+    current.title = "当前颜色 " + state.color;
+    current.setAttribute("aria-label", "当前颜色 " + state.color + "，点击恢复涂色");
+    current.addEventListener("click", function currentClicked() { setColor(state.color); });
+    container.append(current);
+    for (const color of COMMON_COLORS) {
       const swatch = node("button", "gridmap-swatch");
       swatch.type = "button";
       swatch.style.backgroundColor = color;
@@ -641,8 +652,8 @@
       swatch.setAttribute("aria-label", "使用颜色 " + color);
       swatch.title = color;
       swatch.addEventListener("click", function swatchClicked() { setColor(color); });
-      return swatch;
-    }));
+      container.append(swatch);
+    }
   }
 
   function cellAt(event) {
@@ -675,6 +686,12 @@
           state.box = { start: cell, current: cell };
           capturePointer(canvas, event);
           render();
+          return;
+        }
+        // Alt+点击吸取格子颜色；空白格子保持当前选择不变。
+        if (event.altKey) {
+          const picked = state.cells.get(cellKey(cell[0], cell[1]));
+          if (picked) setColor(picked);
           return;
         }
         if (state.pan) return;

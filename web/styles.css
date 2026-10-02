@@ -211,3 +211,6 @@
 /* 网格图工具的切换选中态：橡皮擦开启、空格框选就绪。 */
 #gridmap-eraser[aria-pressed="true"]{background:var(--accent-soft);border-color:#b9c8ff;color:var(--accent)}
 #gridmap-eraser[aria-pressed="true"]:hover{background:#e0e8ff}
+/* 当前颜色指示：固定显示在常用颜色区最左侧，虚线描边区别于可选色块。 */
+.gridmap-current{width:22px;height:22px;border-radius:6px;border:1px solid #c9d2e3;padding:0;flex-shrink:0;outline:1px dashed #98a5ba;outline-offset:2px;margin-right:6px}
+.gridmap-current:hover{outline-color:var(--accent)}
