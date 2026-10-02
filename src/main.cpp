@@ -1,4 +1,5 @@
 #include "app/WebWindow.h"
+#include "app/WallpaperWindow.h"
 
 #include <QApplication>
 #include <QCommandLineParser>
@@ -14,6 +15,8 @@
 // 初始化原生进程、兼容数据目录与单实例唤醒，再进入 Qt 事件循环。
 int main(int argc, char* argv[])
 {
+    // 壁纸媒体协议须在创建应用对象前注册。
+    WallpaperWindow::registerMediaScheme();
     QApplication app(argc, argv);
     app.setApplicationName(QStringLiteral("DesktopTool"));
     app.setOrganizationName(QStringLiteral("DesktopTool"));

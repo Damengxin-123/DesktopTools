@@ -108,6 +108,17 @@ QImage readBoundedImage(QImageReader& reader)
     reader.setAutoTransform(true);
     return reader.read();
 }
+
+// 把剪贴板图像按毫秒时间戳命名保存，避免与已有文件冲突。
+QString saveClipboardImage(const QImage& image, const QString& directory)
+{
+    const QString base = QStringLiteral("剪贴板图片_")
+        + QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd_hh-mm-ss-zzz"));
+    QString path = QDir(directory).filePath(base + QStringLiteral(".png"));
+    for (int index = 2; QFile::exists(path); ++index)
+        path = QDir(directory).filePath(base + QStringLiteral("-%1.png").arg(index));
+    return image.save(path, "PNG") ? path : QString();
+}
 }
 
 ClipboardService::ClipboardService(const QString& dataRoot, bool listen, QObject* parent)
@@ -493,6 +504,43 @@ QVariantMap ClipboardService::copyExternalFile(const QString& path)
     m_lastCaptureTime.invalidate();
     QGuiApplication::clipboard()->setMimeData(mime);
     return ServiceResult::success();
+}
+
+QVariantMap ClipboardService::pasteResource(const QString& directory)
+{
+    const QMimeData* mime = QGuiApplication::clipboard()->mimeData();
+    if (!mime)
+        return ServiceResult::failure(QStringLiteral("剪贴板暂时无法读取，请重试。"));
+    // 优先使用复制的单个文件引用，保留原文件位置；截屏等纯图像内容保存为 PNG。
+    QStringList files;
+    for (const QUrl& url : mime->urls()) {
+        if (url.isLocalFile())
+            files.append(url.toLocalFile());
+    }
+    if (files.size() > 1)
+        return ServiceResult::failure(QStringLiteral("剪贴板中复制了多个文件，请只复制一个文件后重试。"));
+    if (files.size() == 1) {
+        const QFileInfo file(QDir::cleanPath(files.first()));
+        if (!file.isFile() || !file.exists())
+            return ServiceResult::failure(QStringLiteral("剪贴板引用的文件不存在或已删除。"));
+        return ServiceResult::success(QVariantMap{{QStringLiteral("target"),
+            QDir::toNativeSeparators(file.absoluteFilePath())}, {QStringLiteral("title"), file.fileName()}});
+    }
+    if (!mime->hasImage())
+        return ServiceResult::failure(QStringLiteral("剪贴板中没有可用的图片或文件，请先复制内容。"));
+    const QImage image = qvariant_cast<QImage>(mime->imageData());
+    if (image.isNull())
+        return ServiceResult::failure(QStringLiteral("剪贴板中的图像无法读取。"));
+    const QSize size = image.size();
+    if (size.isEmpty() || qint64(size.width()) * size.height() > MaximumImagePixels)
+        return ServiceResult::failure(QStringLiteral("剪贴板图像超过 2000 万像素，请缩小后再使用。"));
+    if (!QDir().mkpath(directory))
+        return ServiceResult::failure(QStringLiteral("无法创建剪贴板图片保存目录。"));
+    const QString path = saveClipboardImage(image, directory);
+    if (path.isEmpty())
+        return ServiceResult::failure(QStringLiteral("剪贴板图像保存失败，请重试。"));
+    return ServiceResult::success(QVariantMap{{QStringLiteral("target"), QDir::toNativeSeparators(path)},
+        {QStringLiteral("title"), QFileInfo(path).fileName()}});
 }
 
 QVariantMap ClipboardService::pin(const QString& id, bool pinned)

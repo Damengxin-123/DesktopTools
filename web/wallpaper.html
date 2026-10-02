@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>动态壁纸</title>
+  <style>
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: #000; overflow: hidden; }
+    #wallpaper-content { width: 100%; height: 100%; background-color: #000; }
+    #wallpaper-content img { display: none; }
+  </style>
+</head>
+<body>
+  <div id="wallpaper-content"></div>
+  <script src="wallpaper-layout.js"></script>
+  <script>
+    "use strict";
+    // 最近一次显示参数，改变模式时保留当前媒体节点和动图进度。
+    let current = null;
+    // 当前图片元素，仅用于尺寸探测，视频由 Qt Multimedia 原生播放。
+    let media = null;
+    // 根据物理屏幕尺寸布局图片，缩放率不同也保持原尺寸和平铺比例。
+    function layout() {
+      if (!current || !media) return;
+      const container = document.getElementById("wallpaper-content");
+      window.desktopWallpaperLayout.apply(container, current.src, current.mode || "fill",
+        media.naturalWidth, media.naturalHeight, current.screenWidth, current.screenHeight,
+        container.clientWidth, container.clientHeight);
+    }
+    // 原生侧以 JSON 参数调用媒体协议地址，切换显示方式时不重新加载资源。
+    function show(payload) {
+      if (!payload || payload.kind !== "image" || typeof payload.src !== "string" || !payload.src) return;
+      const sameSource = current && current.src === payload.src && current.kind === payload.kind;
+      current = payload;
+      if (sameSource) { layout(); return; }
+      media = document.createElement("img");
+      media.addEventListener("load", layout);
+      const container = document.getElementById("wallpaper-content");
+      container.style.backgroundImage = "none";
+      container.replaceChildren(media);
+      media.src = payload.src;
+      layout();
+    }
+    new ResizeObserver(layout).observe(document.getElementById("wallpaper-content"));
+    // 切换到原生视频时释放网页图片，避免隐藏的 GIF 继续播放。
+    function clear() {
+      document.getElementById("wallpaper-content").style.backgroundImage = "none";
+      document.getElementById("wallpaper-content").replaceChildren();
+      current = null;
+      media = null;
+    }
+
+    window.desktopWallpaperPage = Object.freeze({ show, clear });
+  </script>
+</body>
+</html>

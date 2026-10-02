@@ -212,14 +212,12 @@
     body.append(node("p", "field-help", "关键字用于快速检索表情；修改只影响记录，不会改动原文件。"));
     return { keywords, category };
   }
-  // 添加表情：先选择图片文件，再设置关键字和分类。
-  async function addEmoji() {
-    const result = await window.desktopBridge.call("chooseEmojiImage");
-    if (!result || result.cancelled) return;
+  // 打开添加对话框，path 来自原生文件选择或剪贴板转换，之后设置关键字和分类。
+  function openAddDialog(path, hint) {
     const revision = openDialog("添加表情", "添加");
-    state.pendingPath = result.target || "";
+    state.pendingPath = path;
     const body = byId("emoji-dialog-body");
-    body.append(node("p", "emoji-form-path", state.pendingPath), node("p", "field-help", "图片路径来自刚才的选择，添加后仍保存在原位置。"));
+    body.append(node("p", "emoji-form-path", state.pendingPath), node("p", "field-help", hint));
     const form = buildForm(body, { path: state.pendingPath, keywords: [], categoryId: state.category });
     form.keywords.focus();
     state.confirm = async function submitAddEmoji() {
@@ -234,6 +232,17 @@
       state.options.toast("表情已添加");
     };
     if (revision !== state.dialogRevision) return;
+  }
+  // 添加表情：先选择图片文件，再设置关键字和分类。
+  async function addEmoji() {
+    const result = await window.desktopBridge.call("chooseEmojiImage");
+    if (!result || result.cancelled) return;
+    openAddDialog(result.target || "", "图片路径来自刚才的选择，添加后仍保存在原位置。");
+  }
+  // 从剪贴板添加：复制的文件直接引用，截屏等图像内容先保存到数据目录。
+  async function addEmojiFromClipboard() {
+    const result = await window.desktopBridge.call("pasteEmojiImage");
+    openAddDialog(result.target || "", "图片路径来自当前剪贴板内容，添加后仅保存对该文件的引用。");
   }
   // 编辑表情的关键字和分类。
   function editEmoji(item) {
@@ -304,6 +313,7 @@
     if (!state.initialized) {
       state.initialized = true;
       byId("add-emoji").addEventListener("click", function addClicked() { addEmoji().catch(state.options.reportError); });
+      byId("add-emoji-clipboard").addEventListener("click", function addFromClipboardClicked() { addEmojiFromClipboard().catch(state.options.reportError); });
       byId("add-emoji-category").addEventListener("click", function newCategoryClicked() { editCategory(null); });
       byId("emoji-search").addEventListener("input", function searchChanged() { state.page = 0; state.revision += 1; scheduleRefresh(); });
       byId("emoji-previous").addEventListener("click", function previousPage() { state.page -= 1; render(); });

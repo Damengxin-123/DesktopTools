@@ -27,6 +27,8 @@ public:
     QVariantMap copy(const QString& id);
     // 将外部文件写入系统剪贴板供粘贴，同时屏蔽历史记录。
     QVariantMap copyExternalFile(const QString& path);
+    // 把当前剪贴板内容转换为可添加的本地资源路径：优先使用复制的单个文件，图像内容保存到指定目录。
+    QVariantMap pasteResource(const QString& directory);
     // 设置置顶状态，自动清理时保留置顶记录。
     QVariantMap pin(const QString& id, bool pinned);
     // 删除选中记录，仅清除历史，不删除引用的原文件。

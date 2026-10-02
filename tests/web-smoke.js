@@ -146,6 +146,7 @@
     check((await call("getShortcuts")).items.length === 0, "快捷方式批删失败");
     check((await call("getNotes")).items.length === 0, "便签删除失败");
 
+
     // 为离屏渲染截图提供临时示例数据，不写入用户数据目录。
     const work = await call("saveShortcutCategory", "", "工作常用");
     await call("saveShortcut", { title: "Qt 开发文档", target: "https://doc.qt.io/qt-6/", type: 1, categoryId: work.id });
@@ -153,7 +154,7 @@
     await call("saveShortcut", { title: "灵感与参考", target: "https://www.qt.io/", type: 1, categoryId: "default" });
     await call("saveNote", { title: "今天的想法", categoryId: "default", html: "<h2>让日常井然有序</h2><p>用熟悉的 Qt 处理本地数据，用 HTML 打造界面。</p>" });
     element("[data-page='shortcuts']").click();
-    window.__smokeResult = { ok: true, summary: "网页 CRUD、信号刷新、分类排序、错误回传、便签图片、退出保护与设置表单全部通过。" };
+    window.__smokeResult = { ok: true, summary: "网页 CRUD、信号刷新、分类排序、错误回传、便签图片、退出保护、设置表单全部通过。" };
   } catch (error) {
     window.__smokeResult = { ok: false, error: error.stack || error.message || String(error) };
   }

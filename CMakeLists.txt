@@ -10,7 +10,7 @@ set(CMAKE_AUTORCC ON)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 # 保持便携版 exe 旁 data 的数据目录约定。
 set(CMAKE_INSTALL_BINDIR ".")
-find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui Widgets Network WebChannel WebEngineWidgets)
+find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui Widgets Network WebChannel WebEngineWidgets Multimedia MultimediaWidgets)
 find_package(LibtorrentRasterbar 2.1 CONFIG REQUIRED)
 
 # 显式维护后端源文件，界面资源由独立的 HTML 资源清单管理。
@@ -23,12 +23,14 @@ add_library(DesktopToolCore STATIC
     src/services/EmojiService.h src/services/EmojiService.cpp
     src/services/DownloadService.h src/services/DownloadService.cpp
     src/services/TorrentService.h src/services/TorrentService.cpp
+    src/services/WallpaperService.h src/services/WallpaperService.cpp
     src/app/GlobalHotkey.h src/app/GlobalHotkey.cpp
+    src/app/WallpaperWindow.h src/app/WallpaperWindow.cpp
     src/app/WebWindow.h src/app/WebWindow.cpp
     src/bridge/AppBridge.h src/bridge/AppBridge.cpp
 )
 target_include_directories(DesktopToolCore PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
-target_link_libraries(DesktopToolCore PUBLIC Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network Qt6::WebChannel Qt6::WebEngineWidgets)
+target_link_libraries(DesktopToolCore PUBLIC Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network Qt6::WebChannel Qt6::WebEngineWidgets Qt6::Multimedia Qt6::MultimediaWidgets)
 target_link_libraries(DesktopToolCore PRIVATE LibtorrentRasterbar::torrent-rasterbar)
 target_compile_definitions(DesktopToolCore PUBLIC DESKTOPTOOL_VERSION="${PROJECT_VERSION}" NOMINMAX WIN32_LEAN_AND_MEAN)
 if(MSVC)
@@ -65,6 +67,18 @@ if(BUILD_TESTING)
     target_link_libraries(EmojiServiceTest PRIVATE DesktopToolCore Qt6::Test)
     add_test(NAME emoji-service COMMAND EmojiServiceTest)
     set_tests_properties(emoji-service PROPERTIES TIMEOUT 60 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    add_executable(WallpaperServiceTest tests/WallpaperServiceTest.cpp)
+    target_link_libraries(WallpaperServiceTest PRIVATE DesktopToolCore Qt6::Test)
+    add_test(NAME wallpaper-service COMMAND WallpaperServiceTest)
+    set_tests_properties(wallpaper-service PROPERTIES TIMEOUT 60 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    add_executable(WallpaperVideoTest tests/WallpaperVideoTest.cpp resources/app.qrc)
+    target_link_libraries(WallpaperVideoTest PRIVATE DesktopToolCore Qt6::Test)
+    target_compile_definitions(WallpaperVideoTest PRIVATE TEST_VIDEO_FILE="${CMAKE_CURRENT_SOURCE_DIR}/tests/media/wallpaper-h264.mp4")
+    add_test(NAME wallpaper-video COMMAND WallpaperVideoTest)
+    set_tests_properties(wallpaper-video PROPERTIES TIMEOUT 60 ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QTWEBENGINE_CHROMIUM_FLAGS=--disable-gpu")
+    # 真实桌面环境的动态壁纸冒烟程序，需手动运行验证挂载与媒体加载。
+    add_executable(wallpaper-smoke tests/WallpaperSmoke.cpp resources/app.qrc)
+    target_link_libraries(wallpaper-smoke PRIVATE DesktopToolCore)
     add_executable(CatalogServiceTest tests/CatalogServiceTest.cpp)
     target_link_libraries(CatalogServiceTest PRIVATE DesktopToolCore)
     add_test(NAME catalog-services COMMAND CatalogServiceTest)

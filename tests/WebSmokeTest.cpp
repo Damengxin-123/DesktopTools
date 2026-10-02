@@ -17,6 +17,7 @@
 #include <QJsonObject>
 #include <QMimeData>
 #include <QImage>
+#include <QPainter>
 #include <QPointer>
 #include <QTemporaryDir>
 #include <QTest>
@@ -48,6 +49,8 @@ private slots:
     void emojiThroughPage();
     // 表情库损坏时仅禁用表情操作，其他页面继续可用。
     void damagedEmojiLibraryIsIsolated();
+    // 验证屏幕示意图、切换目标、单屏应用和恢复系统壁纸的真实桥接。
+    void wallpaperThroughPage();
 private:
     // 同步等待一次短 JavaScript 求值，带超时防止测试挂起。
     static QVariant evaluate(QWebEnginePage* page, const QString& source);
@@ -474,6 +477,75 @@ void WebSmokeTest::damagedEmojiLibraryIsIsolated()
     QVERIFY(evaluate(page, QStringLiteral("!document.querySelector('#emoji-error').hidden && document.querySelector('#emoji-error').textContent.length > 0 && !document.querySelector('#workspace').inert")).toBool());
     QVERIFY(libraryFile.open(QIODevice::ReadOnly));
     QCOMPARE(libraryFile.readAll(), QByteArray("{broken"));
+}
+
+void WebSmokeTest::wallpaperThroughPage()
+{
+    QTemporaryDir directory;
+    WebWindow window(directory.path(), false);
+    window.resize(1400, 1000);
+    window.show();
+    auto* page = window.webView()->page();
+    QTRY_VERIFY_WITH_TIMEOUT(evaluate(page, QStringLiteral("document.documentElement.dataset.ready === 'true'")).toBool(), 20000);
+    auto* bridge = window.findChild<AppBridge*>();
+    QVERIFY(bridge);
+    const auto screens = bridge->getWallpaper().value("data").toMap().value("screens").toList();
+    QVERIFY(!screens.isEmpty());
+    QImage image(640, 640, QImage::Format_RGB32);
+    image.fill(QColor("#3d78c8"));
+    // 方形色块壁纸让宽屏适应、填充和平铺的差别可见。
+    {
+        QPainter painter(&image);
+        painter.fillRect(0, 0, 640, 150, QColor("#f7d36d"));
+        painter.fillRect(100, 220, 440, 200, QColor("#bce5ed"));
+        painter.fillRect(0, 490, 640, 150, QColor("#153b70"));
+    }
+    const QString firstPath = directory.filePath(QStringLiteral("主屏海洋.png"));
+    QVERIFY(image.save(firstPath));
+    image.fill(QColor("#bc7d49"));
+    const QString secondPath = directory.filePath(QStringLiteral("副屏夕阳.png"));
+    QVERIFY(image.save(secondPath));
+    const QString firstScreen = screens.first().toMap().value("id").toString();
+    const QString lastScreen = screens.last().toMap().value("id").toString();
+    const auto first = bridge->addWallpaper({{"path", firstPath}, {"screenId", firstScreen}});
+    QVERIFY(first.value("ok").toBool());
+    const auto second = bridge->addWallpaper({{"path", secondPath}, {"screenId", lastScreen}});
+    QVERIFY(second.value("ok").toBool());
+    evaluate(page, QStringLiteral("document.querySelector('[data-page=wallpaper]').click()"));
+    QTRY_COMPARE_WITH_TIMEOUT(evaluate(page, QStringLiteral("document.querySelectorAll('.wallpaper-monitor').length")).toInt(), screens.size(), 10000);
+    QTRY_COMPARE_WITH_TIMEOUT(evaluate(page, QStringLiteral("document.querySelectorAll('.wallpaper-card').length")).toInt(), 2, 10000);
+    evaluate(page, QStringLiteral("document.querySelectorAll('.wallpaper-monitor')[0].click()"));
+    QVERIFY(evaluate(page, QStringLiteral("document.querySelectorAll('.wallpaper-monitor')[0].getAttribute('aria-pressed') === 'true'")).toBool());
+    QTRY_VERIFY_WITH_TIMEOUT(evaluate(page, QStringLiteral("document.querySelector('.wallpaper-monitor-preview').style.backgroundImage.startsWith('url(\"data:image/png;base64,')")).toBool(), 10000);
+    evaluate(page, QStringLiteral("document.querySelector('input[name=wallpaper-mode][value=fit]').click()"));
+    QTRY_COMPARE_WITH_TIMEOUT(bridge->getWallpaper().value("data").toMap().value("screens").toList().first().toMap().value("displayMode").toString(), QStringLiteral("fit"), 10000);
+    QTRY_VERIFY_WITH_TIMEOUT(evaluate(page, QStringLiteral("!document.querySelector('#wallpaper-display-modes').disabled && document.querySelector('.wallpaper-monitor-preview').style.backgroundSize === 'contain'")).toBool(), 10000);
+    evaluate(page, QStringLiteral("document.querySelector('input[name=wallpaper-mode][value=tile]').click()"));
+    QTRY_COMPARE_WITH_TIMEOUT(bridge->getWallpaper().value("data").toMap().value("screens").toList().first().toMap().value("displayMode").toString(), QStringLiteral("tile"), 10000);
+    QTRY_VERIFY_WITH_TIMEOUT(evaluate(page, QStringLiteral("!document.querySelector('#wallpaper-display-modes').disabled && document.querySelector('.wallpaper-monitor-preview').style.backgroundRepeat === 'repeat' && document.querySelectorAll('input[name=wallpaper-mode]:checked').length === 1")).toBool(), 10000);
+    if (screens.size() > 1)
+        QCOMPARE(bridge->getWallpaper().value("data").toMap().value("screens").toList().last().toMap().value("displayMode").toString(), QStringLiteral("fill"));
+    // 最近添加的第二条历史应用到第一屏，验证界面传递了正确的目标标识。
+    evaluate(page, QStringLiteral("document.querySelector('.wallpaper-card .emoji-card-actions button').click()"));
+    const QString secondId = second.value("data").toMap().value("id").toString();
+    QTRY_COMPARE_WITH_TIMEOUT(bridge->getWallpaper().value("data").toMap().value("screens").toList().first().toMap().value("activeId").toString(), secondId, 10000);
+    QTRY_VERIFY_WITH_TIMEOUT(evaluate(page, QStringLiteral("!document.querySelector('#clear-screen-wallpaper').disabled")).toBool(), 10000);
+    evaluate(page, QStringLiteral("document.querySelector('#clear-screen-wallpaper').click()"));
+    QTRY_VERIFY_WITH_TIMEOUT(bridge->getWallpaper().value("data").toMap().value("screens").toList().first().toMap().value("activeId").toString().isEmpty(), 10000);
+    if (screens.size() > 1)
+        QCOMPARE(bridge->getWallpaper().value("data").toMap().value("screens").toList().last().toMap().value("activeId").toString(), secondId);
+    // 布局检查来自测试窗口自身渲染，不读取或控制用户桌面。
+    QTRY_VERIFY_WITH_TIMEOUT(evaluate(page, QStringLiteral("document.querySelector('.wallpaper-monitor').getBoundingClientRect().width > 20")).toBool(), 10000);
+    const QString screenshot = qEnvironmentVariable("DESKTOPTOOL_WALLPAPER_SCREENSHOT");
+    if (!screenshot.isEmpty()) {
+        QVERIFY(bridge->useWallpaperOnScreen(first.value("data").toMap().value("id").toString(), firstScreen).value("ok").toBool());
+        QVERIFY(bridge->setWallpaperDisplayMode(firstScreen, "fit").value("ok").toBool());
+        QTRY_VERIFY_WITH_TIMEOUT(evaluate(page, QStringLiteral("document.querySelector('input[name=wallpaper-mode][value=fit]').checked && document.querySelector('.wallpaper-monitor-preview').style.backgroundSize === 'contain'")).toBool(), 10000);
+        // 等待异步页面刷新和绘制完成，避免捕获上一帧的空列表。
+        QTRY_COMPARE_WITH_TIMEOUT(evaluate(page, QStringLiteral("document.querySelector('#wallpaper-count').textContent")).toString(), QStringLiteral("2"), 10000);
+        QTest::qWait(200);
+        QVERIFY(window.grab().save(screenshot));
+    }
 }
 
 // 初始化测试用 Qt 应用；不会启用托盘、系统热键或单实例服务。

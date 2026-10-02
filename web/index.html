@@ -11,6 +11,8 @@
   <script defer src="downloads.js"></script>
   <script defer src="clipboard.js"></script>
   <script defer src="emoji.js"></script>
+  <script defer src="wallpaper.js"></script>
+  <script defer src="wallpaper-layout.js"></script>
   <script defer src="app.js"></script>
 </head>
 <body>
@@ -24,6 +26,7 @@
         <button class="nav-button" data-page="emoji"><span aria-hidden="true">☺</span>表情<span class="nav-count" id="emoji-count">0</span></button>
         <button class="nav-button" data-page="downloads"><span aria-hidden="true">↓</span>下载<span class="nav-count" id="download-count">0</span></button>
         <button class="nav-button" data-page="clipboard"><span aria-hidden="true">▣</span>剪贴板<span class="nav-count" id="clipboard-count">0</span></button>
+        <button class="nav-button" data-page="wallpaper"><span aria-hidden="true">❋</span>壁纸<span class="nav-count" id="wallpaper-count">0</span></button>
         <button class="nav-button" data-page="settings"><span aria-hidden="true">⚙</span>设置</button>
       </nav>
       <div class="sidebar-bottom"><span class="status-dot" id="connection-dot"></span><span id="connection-status">正在连接桌面程序…</span><span class="version" id="app-version"></span></div>
@@ -95,13 +98,36 @@
           <div class="clipboard-pagination"><button id="clipboard-previous" class="button secondary" disabled>上一页</button><span id="clipboard-page-info" class="muted">第 1 / 1 页</span><button id="clipboard-next" class="button secondary" disabled>下一页</button></div>
         </section>
         <section class="page emoji-page" id="page-emoji" aria-labelledby="emoji-heading" hidden>
-          <header class="page-header"><div><div class="eyebrow">EMOJI LIBRARY</div><h1 id="emoji-heading">表情</h1><p>分类管理表情图片，关键字随时检索。</p></div><button id="add-emoji" class="button primary"><span aria-hidden="true">＋</span>添加表情</button></header>
+          <header class="page-header"><div><div class="eyebrow">EMOJI LIBRARY</div><h1 id="emoji-heading">表情</h1><p>分类管理表情图片，关键字随时检索。</p></div><div class="header-actions"><button id="add-emoji-clipboard" class="button secondary">从剪贴板添加</button><button id="add-emoji" class="button primary"><span aria-hidden="true">＋</span>添加表情</button></div></header>
           <div id="emoji-error" class="notice warning" role="alert" hidden></div>
           <div class="section-toolbar"><label class="search-field"><span aria-hidden="true">⌕</span><input id="emoji-search" type="search" placeholder="搜索关键字或文件名…" aria-label="搜索表情"></label><button id="add-emoji-category" class="button secondary">＋ 新建分类</button></div>
           <div class="category-bar" id="emoji-categories" aria-label="表情分类"></div>
           <div id="emoji-list" class="emoji-grid" aria-label="表情列表"></div>
           <div id="emoji-empty" class="empty-state"><div class="empty-icon" aria-hidden="true">☺</div><h2>还没有表情</h2><p>点击“添加表情”选择图片文件，并设置检索关键字。</p></div>
           <div class="clipboard-pagination"><button id="emoji-previous" class="button secondary" disabled>上一页</button><span id="emoji-page-info" class="muted">第 1 / 1 页</span><button id="emoji-next" class="button secondary" disabled>下一页</button></div>
+        </section>
+        <section class="page wallpaper-page" id="page-wallpaper" aria-labelledby="wallpaper-heading" hidden>
+          <header class="page-header"><div><div class="eyebrow">LIVE WALLPAPER</div><h1 id="wallpaper-heading">动态壁纸</h1><p>把动图或视频设为桌面壁纸，显示在图标层之下，不影响正常使用。</p></div><label class="wallpaper-switch" for="wallpaper-enabled"><input id="wallpaper-enabled" type="checkbox" role="switch"><span class="switch-track" aria-hidden="true"></span><span>开启动态壁纸</span></label></header>
+          <div id="wallpaper-error" class="notice warning" role="alert" hidden></div>
+          <div class="wallpaper-displays-panel">
+            <div class="wallpaper-displays-heading"><strong>选择显示器</strong><span id="wallpaper-screen-count" class="muted"></span></div>
+            <p class="muted">点击下方屏幕，单独设置它的壁纸。屏幕位置和大小按系统布局显示。</p>
+            <div id="wallpaper-displays" class="wallpaper-displays" role="group" aria-label="已连接显示器"></div>
+            <div class="wallpaper-displays-footer"><span id="wallpaper-screen-detail"></span><button id="clear-screen-wallpaper" class="button secondary small">此屏恢复系统壁纸</button></div>
+            <fieldset id="wallpaper-display-modes" class="wallpaper-display-modes" aria-describedby="wallpaper-mode-hint">
+              <legend>图片显示方式</legend>
+              <label><input type="radio" name="wallpaper-mode" value="fill" checked><span>填充</span></label>
+              <label><input type="radio" name="wallpaper-mode" value="fit"><span>适应</span></label>
+              <label><input type="radio" name="wallpaper-mode" value="stretch"><span>拉伸</span></label>
+              <label><input type="radio" name="wallpaper-mode" value="tile"><span>平铺</span></label>
+              <label><input type="radio" name="wallpaper-mode" value="center"><span>居中</span></label>
+            </fieldset>
+            <p id="wallpaper-mode-hint" class="muted" role="status"></p>
+          </div>
+          <div class="wallpaper-status-row"><span id="wallpaper-status" class="muted" role="status">未开启</span><div class="header-actions"><button id="add-wallpaper-clipboard" class="button secondary">从剪贴板添加</button><button id="add-wallpaper" class="button primary"><span aria-hidden="true">＋</span>选择本地资源</button></div></div>
+          <p class="field-help">支持 GIF、动态 WebP 等动图和 MP4、WebM 等视频；程序运行或隐藏到托盘时壁纸持续显示，退出程序后壁纸停止，下次开启自动恢复。历史记录最多保存 100 条，删除记录不会删除原文件。</p>
+          <div id="wallpaper-list" class="emoji-grid" aria-label="壁纸历史"></div>
+          <div id="wallpaper-empty" class="empty-state"><div class="empty-icon" aria-hidden="true">❋</div><h2>还没有壁纸记录</h2><p>点击“选择本地资源”挑选动图或视频，立即设为桌面壁纸。</p></div>
         </section>
         <section class="page settings-page" id="page-settings" aria-labelledby="settings-heading" hidden>
           <header class="page-header"><div><div class="eyebrow">PREFERENCES</div><h1 id="settings-heading">设置</h1><p>调整适合自己的工作方式。</p></div></header>
@@ -135,5 +161,6 @@
   </dialog>
   <dialog id="clipboard-dialog" class="app-dialog clipboard-dialog" aria-labelledby="clipboard-dialog-title"><div class="dialog-heading"><h2 id="clipboard-dialog-title">剪贴板详情</h2><button id="clipboard-dialog-close" class="icon-button" aria-label="关闭剪贴板详情">×</button></div><div id="clipboard-dialog-body"></div><div class="dialog-actions"><button id="clipboard-dialog-cancel" class="button secondary">关闭</button><button id="clipboard-dialog-confirm" class="button danger primary" hidden>确认删除</button></div><p id="clipboard-dialog-error" class="field-error" role="alert" hidden></p></dialog>
   <dialog id="emoji-dialog" class="app-dialog" aria-labelledby="emoji-dialog-title"><form id="emoji-dialog-form"><div class="dialog-heading"><h2 id="emoji-dialog-title">表情</h2><button id="emoji-dialog-close" type="button" class="icon-button" aria-label="关闭表情对话框">×</button></div><div id="emoji-dialog-body"></div><p id="emoji-dialog-error" class="field-error" role="alert" hidden></p><div class="dialog-actions"><button id="emoji-dialog-cancel" type="button" class="button secondary">取消</button><button id="emoji-dialog-confirm" type="submit" class="button primary">保存</button></div></form></dialog>
+  <dialog id="wallpaper-dialog" class="app-dialog" aria-labelledby="wallpaper-dialog-title"><form id="wallpaper-dialog-form"><div class="dialog-heading"><h2 id="wallpaper-dialog-title">动态壁纸</h2><button id="wallpaper-dialog-close" type="button" class="icon-button" aria-label="关闭动态壁纸对话框">×</button></div><div id="wallpaper-dialog-body"></div><p id="wallpaper-dialog-error" class="field-error" role="alert" hidden></p><div class="dialog-actions"><button id="wallpaper-dialog-cancel" type="button" class="button secondary">取消</button><button id="wallpaper-dialog-confirm" type="submit" class="button primary">保存</button></div></form></dialog>
 </body>
 </html>

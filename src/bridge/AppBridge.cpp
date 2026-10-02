@@ -8,6 +8,7 @@
 #include "services/ServiceResult.h"
 #include "services/SettingsService.h"
 #include "services/ShortcutService.h"
+#include "services/WallpaperService.h"
 #include <QApplication>
 #include <QClipboard>
 #include <QDesktopServices>
@@ -45,6 +46,7 @@ AppBridge::AppBridge(const QString& dataRoot, QWidget* window, bool nativeIntegr
       m_downloads(new DownloadService(m_dataRoot, this)),
       m_clipboard(new ClipboardService(m_dataRoot, nativeIntegration, this)),
       m_emoji(new EmojiService(m_dataRoot, m_clipboard, this)),
+      m_wallpaper(new WallpaperService(m_dataRoot, nativeIntegration, this)),
       m_hotkey(new GlobalHotkey(nativeIntegration, this))
 {
     connect(m_shortcuts, &ShortcutService::changed, this, &AppBridge::shortcutsChanged);
@@ -53,6 +55,7 @@ AppBridge::AppBridge(const QString& dataRoot, QWidget* window, bool nativeIntegr
     connect(m_downloads, &DownloadService::changed, this, &AppBridge::downloadsChanged);
     connect(m_clipboard, &ClipboardService::changed, this, &AppBridge::clipboardChanged);
     connect(m_emoji, &EmojiService::changed, this, &AppBridge::emojisChanged);
+    connect(m_wallpaper, &WallpaperService::changed, this, &AppBridge::wallpaperChanged);
     connect(m_hotkey, &GlobalHotkey::activated, this, &AppBridge::activateWindowRequested);
     const auto result = m_settings->snapshot();
     if (result.value("ok").toBool()) {
@@ -117,6 +120,11 @@ QVariantMap AppBridge::chooseEmojiImage()
     return ServiceResult::success(QVariantMap{{"target", path}, {"title", QFileInfo(path).fileName()}});
 }
 
+QVariantMap AppBridge::pasteEmojiImage()
+{
+    return m_clipboard->pasteResource(QDir(m_dataRoot).absoluteFilePath(QStringLiteral("emoji/clipboard")));
+}
+
 QVariantMap AppBridge::addEmoji(const QVariantMap& item) { return m_emoji->add(item); }
 QVariantMap AppBridge::saveEmoji(const QVariantMap& item) { return m_emoji->save(item); }
 QVariantMap AppBridge::deleteEmojis(const QStringList& ids) { return m_emoji->remove(ids); }
@@ -125,6 +133,37 @@ QVariantMap AppBridge::saveEmojiCategory(const QString& id, const QString& name)
 QVariantMap AppBridge::deleteEmojiCategory(const QString& id) { return m_emoji->removeCategory(id); }
 QVariantMap AppBridge::openEmojiDirectory(const QString& id) { return m_emoji->openDirectory(id); }
 QVariantMap AppBridge::copyEmojiFile(const QString& id) { return m_emoji->copyFile(id); }
+
+QVariantMap AppBridge::getWallpaper() const { return m_wallpaper->snapshot(); }
+
+QVariantMap AppBridge::chooseWallpaperResource()
+{
+    const QString patterns = QStringLiteral(
+        "*.gif *.webp *.png *.jpg *.jpeg *.bmp *.apng *.svg"
+        " *.mp4 *.webm *.mkv *.avi *.mov *.m4v *.wmv *.mpg *.mpeg *.flv *.ts *.3gp");
+    const QString path = QFileDialog::getOpenFileName(m_window, QStringLiteral("选择动态壁纸资源"), QString(),
+        QStringLiteral("图片和视频 (%1);;所有文件 (*.*)").arg(patterns));
+    if (path.isEmpty())
+        return ServiceResult::success(QVariantMap{{"cancelled", true}});
+    return ServiceResult::success(QVariantMap{{"target", path}, {"title", QFileInfo(path).fileName()}});
+}
+
+QVariantMap AppBridge::addWallpaper(const QVariantMap& item) { return m_wallpaper->add(item); }
+QVariantMap AppBridge::useWallpaper(const QString& id) { return m_wallpaper->use(id); }
+// 按稳定显示器标识应用历史壁纸。
+QVariantMap AppBridge::useWallpaperOnScreen(const QString& id, const QString& screenId) { return m_wallpaper->use(id, screenId); }
+// 撤回单个显示器的动态壁纸。
+QVariantMap AppBridge::clearScreenWallpaper(const QString& screenId) { return m_wallpaper->clearScreen(screenId); }
+// 图片显示方式按屏幕持久化并立即应用。
+QVariantMap AppBridge::setWallpaperDisplayMode(const QString& screenId, const QString& mode) { return m_wallpaper->setDisplayMode(screenId, mode); }
+QVariantMap AppBridge::removeWallpapers(const QStringList& ids) { return m_wallpaper->remove(ids); }
+QVariantMap AppBridge::setWallpaperEnabled(bool enabled) { return m_wallpaper->setEnabled(enabled); }
+QVariantMap AppBridge::openWallpaperDirectory(const QString& id) { return m_wallpaper->openDirectory(id); }
+
+QVariantMap AppBridge::pasteWallpaperResource()
+{
+    return m_clipboard->pasteResource(QDir(m_dataRoot).absoluteFilePath(QStringLiteral("wallpaper/clipboard")));
+}
 QVariantMap AppBridge::getNote(const QString& id) const { return m_notes->readNote(id); }
 QVariantMap AppBridge::saveNote(const QVariantMap& note) { return m_notes->saveNote(note); }
 QVariantMap AppBridge::deleteNotes(const QStringList& ids) { return m_notes->removeNotes(ids); }

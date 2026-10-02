@@ -6,6 +6,9 @@
     <file alias="downloads.js">../web/downloads.js</file>
     <file alias="clipboard.js">../web/clipboard.js</file>
     <file alias="emoji.js">../web/emoji.js</file>
+    <file alias="wallpaper.html">../web/wallpaper.html</file>
+    <file alias="wallpaper.js">../web/wallpaper.js</file>
+    <file alias="wallpaper-layout.js">../web/wallpaper-layout.js</file>
     <file alias="app.js">../web/app.js</file>
   </qresource>
   <qresource prefix="/images">

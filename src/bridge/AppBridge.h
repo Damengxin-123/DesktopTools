@@ -11,6 +11,7 @@ class EmojiService;
 class NoteService;
 class SettingsService;
 class ShortcutService;
+class WallpaperService;
 class QWidget;
 
 // HTML 页面的唯一原生接口，转发业务操作并处理系统交互。
@@ -58,6 +59,8 @@ public:
     Q_INVOKABLE QVariantMap getEmojis(const QString& query) const;
     // 显示原生图片选择器，返回路径和是否取消的标志。
     Q_INVOKABLE QVariantMap chooseEmojiImage();
+    // 把当前剪贴板中的图像或复制的单个文件转换为新表情的来源路径。
+    Q_INVOKABLE QVariantMap pasteEmojiImage();
     // 添加本地表情图片并设置检索关键字。
     Q_INVOKABLE QVariantMap addEmoji(const QVariantMap& item);
     // 修改表情的检索关键字和所属分类。
@@ -72,6 +75,28 @@ public:
     Q_INVOKABLE QVariantMap openEmojiDirectory(const QString& id);
     // 复制表情原文件到剪贴板，不记录到剪贴板历史。
     Q_INVOKABLE QVariantMap copyEmojiFile(const QString& id);
+    // 返回动态壁纸开关状态和历史记录。
+    Q_INVOKABLE QVariantMap getWallpaper() const;
+    // 显示原生媒体选择器，返回路径和是否取消的标志。
+    Q_INVOKABLE QVariantMap chooseWallpaperResource();
+    // 把当前剪贴板中的图像或复制的单个文件转换为壁纸资源路径。
+    Q_INVOKABLE QVariantMap pasteWallpaperResource();
+    // 添加本地壁纸资源并设为当前壁纸。
+    Q_INVOKABLE QVariantMap addWallpaper(const QVariantMap& item);
+    // 切换到历史中的指定壁纸，源文件丢失时返回明确错误。
+    Q_INVOKABLE QVariantMap useWallpaper(const QString& id);
+    // 把历史壁纸应用到指定显示器，不影响其他屏幕。
+    Q_INVOKABLE QVariantMap useWallpaperOnScreen(const QString& id, const QString& screenId);
+    // 撤回指定屏幕的壁纸窗口，恢复系统壁纸。
+    Q_INVOKABLE QVariantMap clearScreenWallpaper(const QString& screenId);
+    // 独立保存并应用指定显示器的图片显示方式。
+    Q_INVOKABLE QVariantMap setWallpaperDisplayMode(const QString& screenId, const QString& mode);
+    // 批量删除壁纸历史记录，保留原文件。
+    Q_INVOKABLE QVariantMap removeWallpapers(const QStringList& ids);
+    // 开启或关闭动态壁纸，开启时恢复上次的资源。
+    Q_INVOKABLE QVariantMap setWallpaperEnabled(bool enabled);
+    // 打开壁纸原文件所在目录并选中该文件。
+    Q_INVOKABLE QVariantMap openWallpaperDirectory(const QString& id);
     // 返回便签列表与分类。
     Q_INVOKABLE QVariantMap getNotes() const;
     // 读取指定便签的安全 HTML 内容。
@@ -133,6 +158,8 @@ signals:
     void clipboardChanged();
     // 表情库或分类已持久化。
     void emojisChanged();
+    // 动态壁纸开关或历史已持久化。
+    void wallpaperChanged();
     // 热键请求唤醒主窗口。
     void activateWindowRequested();
 private:
@@ -152,6 +179,8 @@ private:
     ClipboardService* m_clipboard;
     // 表情分类和检索服务。
     EmojiService* m_emoji;
+    // 动态壁纸历史和桌面挂载服务。
+    WallpaperService* m_wallpaper;
     // 全局热键注册器。
     GlobalHotkey* m_hotkey;
     // 启动时热键注册失败的说明。

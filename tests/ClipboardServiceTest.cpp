@@ -9,6 +9,7 @@
 #include <QJsonObject>
 #include <QMimeData>
 #include <QTemporaryDir>
+#include <QFileInfo>
 #include <QUrl>
 #include <QtTest>
 
@@ -44,6 +45,10 @@ private slots:
     void failureProtection();
     // 超限仅移除最早未置顶记录，删除和清空保持设置。
     void capacityAndManagement();
+    // 剪贴板资源转换优先使用文件引用，图像内容按唯一名称保存。
+    void pasteResourceFromFileAndImage();
+    // 无内容、多文件与失效引用返回明确错误。
+    void pasteResourceRejectsInvalidClipboard();
 };
 
 void ClipboardServiceTest::filteringAndReload()
@@ -425,6 +430,66 @@ void ClipboardServiceTest::capacityAndManagement()
     QCOMPARE(data(service.snapshot()).value("types").toStringList(), QStringList{"text"});
     ClipboardService reload(directory.path(), false);
     QVERIFY(items(reload).isEmpty());
+}
+
+void ClipboardServiceTest::pasteResourceFromFileAndImage()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    ClipboardService service(directory.path(), false);
+    // 复制的单个文件直接返回原路径，即使同时附带图像内容也不另存副本。
+    QImage original(48, 36, QImage::Format_RGB32);
+    original.fill(QColor(200, 100, 50));
+    const QString png = directory.filePath(QStringLiteral("复制图片.png"));
+    QVERIFY(original.save(png, "PNG"));
+    // setMimeData 会接管数据所有权，传给剪贴板的数据必须堆分配。
+    auto* fileCopy = new QMimeData;
+    fileCopy->setUrls({QUrl::fromLocalFile(png)});
+    fileCopy->setImageData(original);
+    QGuiApplication::clipboard()->setMimeData(fileCopy);
+    const QString target = directory.filePath("emoji/clipboard");
+    const auto fromFile = service.pasteResource(target);
+    QVERIFY(ok(fromFile));
+    QCOMPARE(data(fromFile).value("target").toString(), QDir::toNativeSeparators(png));
+    QCOMPARE(data(fromFile).value("title").toString(), QStringLiteral("复制图片.png"));
+    QCOMPARE(QDir(target).entryList(QDir::Files).size(), 0); // 文件引用不产生副本。
+    // 截屏等纯图像内容保存到指定目录，可原样读回；再次粘贴生成不同文件。
+    QGuiApplication::clipboard()->setImage(original);
+    const auto fromImage = service.pasteResource(target);
+    QVERIFY(ok(fromImage));
+    const QString saved = data(fromImage).value("target").toString();
+    QVERIFY(QFileInfo(saved).fileName().startsWith(QStringLiteral("剪贴板图片_")));
+    QCOMPARE(QImage(saved), original);
+    const auto again = service.pasteResource(target);
+    QVERIFY(ok(again));
+    QVERIFY(data(again).value("target").toString() != saved);
+    QCOMPARE(QDir(target).entryList(QDir::Files).size(), 2);
+}
+
+void ClipboardServiceTest::pasteResourceRejectsInvalidClipboard()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    ClipboardService service(directory.path(), false);
+    // 没有可用内容时提示先复制。
+    QGuiApplication::clipboard()->setMimeData(new QMimeData);
+    const auto empty = service.pasteResource(directory.path());
+    QVERIFY(!ok(empty));
+    QVERIFY(empty.value("error").toString().contains(QStringLiteral("请先复制内容")));
+    // 多个文件引用要求只复制一个。
+    auto* many = new QMimeData;
+    many->setUrls({QUrl::fromLocalFile(directory.filePath("a.png")),
+        QUrl::fromLocalFile(directory.filePath("b.png"))});
+    QGuiApplication::clipboard()->setMimeData(many);
+    const auto multiple = service.pasteResource(directory.path());
+    QVERIFY(!ok(multiple));
+    QVERIFY(multiple.value("error").toString().contains(QStringLiteral("多个文件")));
+    // 引用的文件已删除时返回明确错误。
+    auto* gone = new QMimeData;
+    gone->setUrls({QUrl::fromLocalFile(directory.filePath("missing.png"))});
+    QGuiApplication::clipboard()->setMimeData(gone);
+    QVERIFY(!ok(service.pasteResource(directory.path())));
+    QVERIFY(!QDir(directory.path()).exists(QStringLiteral("missing.png")));
 }
 
 QTEST_MAIN(ClipboardServiceTest)
