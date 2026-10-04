@@ -58,7 +58,7 @@ private:
     void cancelCapture();
     // 遮罩坐标 → 截图像素坐标。
     QPointF toImagePoint(const QPointF& position) const;
-    // 选区的截图像素矩形。
+    // 选区在截图中的设备像素矩形。
     QRectF imageSelection() const;
     // 绘制全部标注（含正在绘制的），坐标为遮罩逻辑坐标。
     void paintStrokes(QPainter* painter) const;

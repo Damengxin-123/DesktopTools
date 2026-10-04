@@ -153,21 +153,30 @@ QPointF ScreenshotOverlay::toImagePoint(const QPointF& position) const
     return QPointF(position.x() * scaleX, position.y() * scaleY);
 }
 
+// 选区在截图中的设备像素矩形。
 QRectF ScreenshotOverlay::imageSelection() const
 {
-    return QRectF(toImagePoint(m_selection.topLeft()), toImagePoint(m_selection.bottomRight()));
+    const double scaleX = double(m_image.width()) / qMax(1.0, m_imageLogical.width());
+    const double scaleY = double(m_image.height()) / qMax(1.0, m_imageLogical.height());
+    return QRectF(m_selection.left() * scaleX, m_selection.top() * scaleY,
+        m_selection.width() * scaleX, m_selection.height() * scaleY);
 }
 
 void ScreenshotOverlay::paintEvent(QPaintEvent* event)
 {
     Q_UNUSED(event)
     QPainter painter(this);
-    // 整幅桌面，随后把选区内的部分以原始亮度重绘。
+    // 整幅屏幕，随后把选区内的部分以原始亮度重绘。
     painter.drawImage(QRectF(0, 0, width(), height()), m_image);
     painter.fillRect(rect(), QColor(0, 0, 0, 110));
     if (!m_selection.isNull()) {
+        // 用与背景完全相同的整图绘制并夹剪到选区，保证选区内外无缝对齐；
+        // 不使用带源矩形的重载，避免高 DPI 下源矩形坐标语义产生偏移。
         painter.setRenderHint(QPainter::Antialiasing, false);
-        painter.drawImage(m_selection, m_image, imageSelection());
+        painter.save();
+        painter.setClipRect(m_selection);
+        painter.drawImage(QRectF(0, 0, m_imageLogical.width(), m_imageLogical.height()), m_image);
+        painter.restore();
         drawSelectionBorder(&painter);
         painter.save();
         painter.setClipRect(m_selection);
@@ -358,7 +367,10 @@ void ScreenshotOverlay::finishCapture()
     composed.setDevicePixelRatio(1.0);
     composed.fill(Qt::transparent);
     QPainter painter(&composed);
-    painter.drawImage(QPoint(0, 0), m_image.copy(crop));
+    // copy 会继承图像的 DPR；显式归一后按设备像素 1:1 画入，避免高 DPI 下缩成一角。
+    QImage cropImage = m_image.copy(crop);
+    cropImage.setDevicePixelRatio(1.0);
+    painter.drawImage(QPoint(0, 0), cropImage);
     // 与屏幕预览使用同一套绘制逻辑：缩放到设备像素并平移到选区原点。
     const double scaleX = m_imageLogical.width() / qMax(1.0, double(width()));
     const double scaleY = m_imageLogical.height() / qMax(1.0, double(height()));

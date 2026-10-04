@@ -91,6 +91,8 @@ private slots:
     void overlayUndoAndCancel();
     // 遮罩摆在非原点几何（模拟副屏）时映射只依赖局部坐标。
     void overlaySecondaryScreenGeometry();
+    // 高 DPR（4K 150%/200% 缩放）下预览与底图对齐，合成图为设备像素。
+    void overlayHighDpiAlignment();
 };
 
 void ScreenshotServiceTest::addsAndReads()
@@ -355,6 +357,48 @@ void ScreenshotServiceTest::overlaySecondaryScreenGeometry()
     // 选区从本屏 (20,20) 开始：屏幕自身的黑色角块不会进入裁剪结果。
     QVERIFY(colorNear(composed.pixelColor(2, 2), QColor(250, 250, 250)));
     QVERIFY(colorNear(composed.pixelColor(65, 65), QColor(230, 47, 47)));
+}
+
+void ScreenshotServiceTest::overlayHighDpiAlignment()
+{
+    // 设备 800×600、DPR 2 的屏幕截图（逻辑 400×300）：左半深红、右半深蓝。
+    // 对 DPR 不为 1 的图像绘制时 QPainter 使用逻辑坐标。
+    QImage screen(800, 600, QImage::Format_RGB32);
+    screen.setDevicePixelRatio(2.0);
+    QPainter painter(&screen);
+    painter.fillRect(0, 0, 200, 300, QColor(180, 40, 40));
+    painter.fillRect(200, 0, 200, 300, QColor(40, 120, 180));
+    painter.end();
+
+    ScreenshotOverlay overlay(screen);
+    overlay.setGeometry(0, 0, 400, 300);
+    overlay.show();
+
+    sendMouse(overlay, QEvent::MouseButtonPress, QPoint(100, 100), Qt::LeftButton);
+    sendMouse(overlay, QEvent::MouseButtonRelease, QPoint(300, 200), Qt::LeftButton);
+    QVERIFY(overlay.isAnnotating());
+
+    // 预览必须与底图对齐：选区内的亮区在逻辑 x=200 处换色，选区外是变暗的底色。
+    const QImage preview = overlay.grab().toImage();
+    QCOMPARE(preview.size(), QSize(400, 300));
+    QVERIFY(colorNear(preview.pixelColor(150, 150), QColor(180, 40, 40), 30));
+    QVERIFY(colorNear(preview.pixelColor(250, 150), QColor(40, 120, 180), 30));
+    // 颜色分界线必须落在逻辑 x=200，证明选区内没有偏移或缩放。
+    QVERIFY(colorNear(preview.pixelColor(196, 150), QColor(180, 40, 40), 40));
+    QVERIFY(colorNear(preview.pixelColor(204, 150), QColor(40, 120, 180), 40));
+    // 选区外为半透明黑罩下的底色。
+    QVERIFY(colorNear(preview.pixelColor(50, 50), QColor(102, 23, 23), 40));
+
+    QImage composed;
+    connect(&overlay, &ScreenshotOverlay::finished, [&composed](const QImage& image, bool) {
+        composed = image;
+    });
+    QTest::keyClick(&overlay, Qt::Key_Return);
+    // 合成为设备像素：逻辑选区 (100,100)-(300,200) 对应 (200,200,400,200)。
+    QCOMPARE(composed.size(), QSize(400, 200));
+    QVERIFY(colorNear(composed.pixelColor(98, 100), QColor(180, 40, 40), 30));
+    QVERIFY(colorNear(composed.pixelColor(302, 100), QColor(40, 120, 180), 30));
+    QVERIFY(colorNear(composed.pixelColor(390, 190), QColor(40, 120, 180), 30));
 }
 
 QTEST_MAIN(ScreenshotServiceTest)
