@@ -1,11 +1,13 @@
 #include "AppBridge.h"
 
 #include "app/GlobalHotkey.h"
+#include "app/ScreenshotOverlay.h"
 #include "services/DownloadService.h"
 #include "services/ClipboardService.h"
 #include "services/EmojiService.h"
 #include "services/NoteService.h"
 #include "services/QrService.h"
+#include "services/ScreenshotService.h"
 #include "services/ServiceResult.h"
 #include "services/SettingsService.h"
 #include "services/ShortcutService.h"
@@ -13,16 +15,22 @@
 #include "services/GridMapService.h"
 #include <QApplication>
 #include <QClipboard>
+#include <QDateTime>
 #include <QDesktopServices>
 #include <QDir>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QGuiApplication>
 #include <QImageReader>
 #include <QJsonValue>
+#include <QMessageBox>
 #include <QMimeData>
+#include <QPointer>
 #include <QSaveFile>
+#include <QScreen>
 #include <QSettings>
 #include <QStandardPaths>
+#include <QTimer>
 #include <QUrl>
 #include <QWidget>
 
@@ -78,7 +86,10 @@ AppBridge::AppBridge(const QString& dataRoot, QWidget* window, bool nativeIntegr
       m_wallpaper(new WallpaperService(m_dataRoot, nativeIntegration, this)),
       m_gridmaps(new GridMapService(m_dataRoot, this)),
       m_qr(new QrService(m_dataRoot, this)),
-      m_hotkey(new GlobalHotkey(nativeIntegration, this))
+      m_screenshots(new ScreenshotService(m_dataRoot, this)),
+      m_hotkey(new GlobalHotkey(nativeIntegration, 0x4D01, this)),
+      m_screenshotHotkey(new GlobalHotkey(nativeIntegration, 0x4D03, this)),
+      m_nativeIntegration(nativeIntegration)
 {
     connect(m_shortcuts, &ShortcutService::changed, this, &AppBridge::shortcutsChanged);
     connect(m_notes, &NoteService::changed, this, &AppBridge::notesChanged);
@@ -89,12 +100,16 @@ AppBridge::AppBridge(const QString& dataRoot, QWidget* window, bool nativeIntegr
     connect(m_wallpaper, &WallpaperService::changed, this, &AppBridge::wallpaperChanged);
     connect(m_gridmaps, &GridMapService::changed, this, &AppBridge::gridMapsChanged);
     connect(m_qr, &QrService::changed, this, &AppBridge::qrHistoryChanged);
+    connect(m_screenshots, &ScreenshotService::changed, this, &AppBridge::screenshotsChanged);
     connect(m_hotkey, &GlobalHotkey::activated, this, &AppBridge::activateWindowRequested);
+    connect(m_screenshotHotkey, &GlobalHotkey::activated, this, [this]() { beginScreenshot(true); });
     const auto result = m_settings->snapshot();
     if (result.value("ok").toBool()) {
         const auto settings = result.value("data").toMap();
         m_hotkey->setShortcut(settings.value("hotkeyModifier").toInt(),
                              settings.value("hotkeyKey").toInt(), &m_hotkeyWarning);
+        m_screenshotHotkey->setShortcut(settings.value("screenshotHotkeyModifier").toInt(),
+            settings.value("screenshotHotkeyKey").toInt(), &m_screenshotHotkeyWarning);
     } else {
         m_hotkeyWarning = result.value("error").toString();
     }
@@ -320,6 +335,105 @@ QVariantMap AppBridge::decodeQr(const QString& imageDataUrl, const QString& sour
     return m_qr->decode(image, source);
 }
 
+QVariantMap AppBridge::getScreenshotHistory() const { return m_screenshots->snapshot(); }
+QVariantMap AppBridge::getScreenshot(const QString& id) const { return m_screenshots->read(id); }
+QVariantMap AppBridge::deleteScreenshots(const QStringList& ids) { return m_screenshots->remove(ids); }
+QVariantMap AppBridge::clearScreenshotHistory() { return m_screenshots->clear(); }
+QVariantMap AppBridge::openScreenshotDirectory(const QString& id) { return m_screenshots->openDirectory(id); }
+
+// 把历史中的截图重新复制到系统剪贴板。
+QVariantMap AppBridge::copyScreenshot(const QString& id)
+{
+    const auto result = m_screenshots->read(id);
+    if (!result.value("ok").toBool())
+        return result;
+    const auto image = result.value("data").toMap().value("image").toString();
+    const QString prefix = QStringLiteral("data:image/png;base64,");
+    if (!image.startsWith(prefix))
+        return ServiceResult::failure(QStringLiteral("截图数据无效，无法复制。"));
+    const QImage decoded = QImage::fromData(QByteArray::fromBase64(image.mid(prefix.size()).toLatin1()), "PNG");
+    if (decoded.isNull())
+        return ServiceResult::failure(QStringLiteral("截图文件损坏，无法复制。"));
+    QApplication::clipboard()->setImage(decoded);
+    return ServiceResult::success();
+}
+
+// 校验并保存截图热键；先预留注册，保存成功后才启用，失败时回滚。
+QVariantMap AppBridge::saveScreenshotHotkey(int modifier, int key)
+{
+    QString error;
+    if (!m_screenshotHotkey->prepareShortcut(modifier, key, &error))
+        return ServiceResult::failure(error);
+    const auto saved = m_settings->save({{"screenshotHotkeyModifier", modifier}, {"screenshotHotkeyKey", key}});
+    if (!saved.value("ok").toBool()) {
+        m_screenshotHotkey->cancelShortcut();
+        return saved;
+    }
+    m_screenshotHotkey->commitShortcut();
+    m_screenshotHotkeyWarning.clear();
+    return saved;
+}
+
+// 抓取整个虚拟桌面的图像。
+QImage AppBridge::grabDesktopImage() const
+{
+    QScreen* screen = QGuiApplication::primaryScreen();
+    if (!screen)
+        return QImage();
+    return screen->grabWindow(0).toImage();
+}
+
+// 隐藏主窗口后抓取桌面并显示遮罩；结束后恢复剪贴板、历史与窗口可见性。
+void AppBridge::beginScreenshot(bool restoreWindow)
+{
+    if (!m_nativeIntegration || m_screenshotBusy)
+        return;
+    m_screenshotBusy = true;
+    if (restoreWindow && m_window)
+        m_window->hide();
+    // 等待窗口真正从屏幕消失后再抓取，避免把本程序截进图里。
+    QTimer::singleShot(restoreWindow ? 260 : 80, this, [this, restoreWindow]() {
+        const QImage desktop = grabDesktopImage();
+        if (desktop.isNull()) {
+            m_screenshotBusy = false;
+            if (restoreWindow && m_window)
+                m_window->show();
+            QMessageBox::warning(m_window, QStringLiteral("截图"),
+                QStringLiteral("无法截取屏幕内容，请重试或联系开发者。"));
+            return;
+        }
+        auto* overlay = new ScreenshotOverlay(desktop);
+        m_overlay = overlay;
+        connect(overlay, &ScreenshotOverlay::finished, this,
+            [this, overlay, restoreWindow](const QImage& image, bool cancelled) {
+            Q_UNUSED(cancelled)
+            m_screenshotBusy = false;
+            m_overlay.clear();
+            overlay->deleteLater();
+            if (!image.isNull()) {
+                QApplication::clipboard()->setImage(image);
+                m_screenshots->add(image, QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
+            }
+            if (restoreWindow && m_window)
+                m_window->show();
+        });
+        overlay->show();
+        overlay->raise();
+        overlay->activateWindow();
+    });
+}
+
+// 由网页按钮或热键触发一次交互式截图。
+QVariantMap AppBridge::startScreenshot()
+{
+    if (!m_nativeIntegration)
+        return ServiceResult::failure(QStringLiteral("当前环境不支持截图功能。"));
+    if (m_screenshotBusy || !m_overlay.isNull())
+        return ServiceResult::failure(QStringLiteral("截图正在进行中，请先完成或取消。"));
+    beginScreenshot(m_window && m_window->isVisible());
+    return ServiceResult::success();
+}
+
 QVariantMap AppBridge::getNote(const QString& id) const { return m_notes->readNote(id); }
 QVariantMap AppBridge::saveNote(const QVariantMap& note) { return m_notes->saveNote(note); }
 QVariantMap AppBridge::deleteNotes(const QStringList& ids) { return m_notes->removeNotes(ids); }
@@ -396,7 +510,8 @@ QVariantMap AppBridge::saveSettings(const QVariantMap& settings)
 QVariantMap AppBridge::resetSettings()
 {
     return saveSettings({{"fontSize", 16}, {"hotkeyModifier", 0}, {"hotkeyKey", 0x77},
-        {"downloadDirectory", QString()}, {"autoStart", false}});
+        {"downloadDirectory", QString()}, {"autoStart", false},
+        {"screenshotHotkeyModifier", 3}, {"screenshotHotkeyKey", 0x41}});
 }
 
 QVariantMap AppBridge::openDataDirectory()
@@ -418,5 +533,6 @@ QVariantMap AppBridge::openGithubRepository()
 QVariantMap AppBridge::getAppInfo() const
 {
     return ServiceResult::success(QVariantMap{{"version", QCoreApplication::applicationVersion()},
-        {"dataPath", m_dataRoot}, {"hotkeyWarning", m_hotkeyWarning}});
+        {"dataPath", m_dataRoot}, {"hotkeyWarning", m_hotkeyWarning},
+        {"screenshotHotkeyWarning", m_screenshotHotkeyWarning}});
 }

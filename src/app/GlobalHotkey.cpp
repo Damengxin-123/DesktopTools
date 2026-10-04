@@ -5,8 +5,8 @@
 #include <windows.h>
 #endif
 
-GlobalHotkey::GlobalHotkey(bool enabled, QObject* parent)
-    : QObject(parent), m_enabled(enabled)
+GlobalHotkey::GlobalHotkey(bool enabled, int idBase, QObject* parent)
+    : QObject(parent), m_enabled(enabled), m_idBase(idBase)
 {
     QCoreApplication::instance()->installNativeEventFilter(this);
 }
@@ -34,7 +34,7 @@ bool GlobalHotkey::prepareShortcut(int modifier, int key, QString* error)
     cancelShortcut();
     if (m_id && modifier == m_modifier && key == m_key)
         return true;
-    const int nextId = m_id == 0x4D01 ? 0x4D02 : 0x4D01;
+    const int nextId = m_id == m_idBase ? m_idBase + 1 : m_idBase;
 #ifdef Q_OS_WIN
     if (m_enabled && !RegisterHotKey(nullptr, nextId, modifier | MOD_NOREPEAT, key)) {
         if (error)

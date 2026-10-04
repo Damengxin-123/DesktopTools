@@ -15,6 +15,7 @@
   <script defer src="wallpaper-layout.js"></script>
   <script defer src="gridmap.js"></script>
   <script defer src="qr.js"></script>
+  <script defer src="screenshot.js"></script>
   <script defer src="app.js"></script>
 </head>
 <body>
@@ -31,6 +32,7 @@
         <button class="nav-button" data-page="wallpaper"><span aria-hidden="true">❋</span>壁纸<span class="nav-count" id="wallpaper-count">0</span></button>
 <button class="nav-button" data-page="gridmap"><span aria-hidden="true">▦</span>网格图<span class="nav-count" id="gridmap-count">0</span></button>
         <button class="nav-button" data-page="qr"><span aria-hidden="true">▩</span>二维码<span class="nav-count" id="qr-count">0</span></button>
+        <button class="nav-button" data-page="screenshot"><span aria-hidden="true">✂</span>截图<span class="nav-count" id="screenshot-count">0</span></button>
         <button class="nav-button" data-page="settings"><span aria-hidden="true">⚙</span>设置</button>
       </nav>
       <div class="sidebar-bottom"><span class="status-dot" id="connection-dot"></span><span id="connection-status">正在连接桌面程序…</span><span class="version" id="app-version"></span></div>
@@ -201,6 +203,24 @@
             </div>
           </div>
         </section>
+        <section class="page screenshot-page" id="page-screenshot" aria-labelledby="screenshot-heading" hidden>
+          <header class="page-header"><div><div class="eyebrow">SCREENSHOT</div><h1 id="screenshot-heading">截图</h1><p>按下热键或点击按钮开始截图，框选区域、添加标注，完成后自动复制并留档。</p></div><button id="screenshot-start" class="button primary"><span aria-hidden="true">✂</span>开始截图</button></header>
+          <div id="screenshot-error" class="notice warning" role="alert" hidden></div>
+          <fieldset class="screenshot-hotkey-card">
+            <legend>截图热键</legend>
+            <div class="screenshot-hotkey-row">
+              <label class="sr-only" for="screenshot-hotkey-input">截图热键</label>
+              <input id="screenshot-hotkey-input" class="hotkey-input" type="text" readonly value="Ctrl+Alt+A" aria-describedby="screenshot-hotkey-help">
+              <button id="screenshot-hotkey-save" class="button secondary" disabled>保存热键</button>
+              <span id="screenshot-hotkey-state" class="muted" role="status"></span>
+            </div>
+            <p class="field-help" id="screenshot-hotkey-help">点击输入框后按下需要的组合键；保存后全局生效，程序隐藏到托盘时同样可用。热键在全屏截图遮罩下触发可能被占用提示拒绝。</p>
+            <div id="screenshot-hotkey-warning" class="notice warning" hidden></div>
+          </fieldset>
+          <div class="screenshot-list-heading"><h2>截图记录</h2><span id="screenshot-summary" class="muted">0 张</span><button id="screenshot-clear" class="button danger quiet" disabled>清空记录</button></div>
+          <div id="screenshot-list" class="screenshot-list" aria-label="截图历史"></div>
+          <div id="screenshot-empty" class="empty-state"><div class="empty-icon" aria-hidden="true">✂</div><h2>还没有截图</h2><p>按截图热键或点击“开始截图”，框选区域并标注后，截图会出现在这里。</p></div>
+        </section>
         <section class="page settings-page" id="page-settings" aria-labelledby="settings-heading" hidden>
           <header class="page-header"><div><div class="eyebrow">PREFERENCES</div><h1 id="settings-heading">设置</h1><p>调整适合自己的工作方式。</p></div></header>
           <form id="settings-form" class="settings-card">
@@ -235,5 +255,6 @@
   <dialog id="emoji-dialog" class="app-dialog" aria-labelledby="emoji-dialog-title"><form id="emoji-dialog-form"><div class="dialog-heading"><h2 id="emoji-dialog-title">表情</h2><button id="emoji-dialog-close" type="button" class="icon-button" aria-label="关闭表情对话框">×</button></div><div id="emoji-dialog-body"></div><p id="emoji-dialog-error" class="field-error" role="alert" hidden></p><div class="dialog-actions"><button id="emoji-dialog-cancel" type="button" class="button secondary">取消</button><button id="emoji-dialog-confirm" type="submit" class="button primary">保存</button></div></form></dialog>
   <dialog id="wallpaper-dialog" class="app-dialog" aria-labelledby="wallpaper-dialog-title"><form id="wallpaper-dialog-form"><div class="dialog-heading"><h2 id="wallpaper-dialog-title">动态壁纸</h2><button id="wallpaper-dialog-close" type="button" class="icon-button" aria-label="关闭动态壁纸对话框">×</button></div><div id="wallpaper-dialog-body"></div><p id="wallpaper-dialog-error" class="field-error" role="alert" hidden></p><div class="dialog-actions"><button id="wallpaper-dialog-cancel" type="button" class="button secondary">取消</button><button id="wallpaper-dialog-confirm" type="submit" class="button primary">保存</button></div></form></dialog>
   <dialog id="gridmap-dialog" class="app-dialog" aria-labelledby="gridmap-dialog-title"><form id="gridmap-dialog-form"><div class="dialog-heading"><h2 id="gridmap-dialog-title">网格图</h2><button id="gridmap-dialog-close" type="button" class="icon-button" aria-label="关闭网格图对话框">×</button></div><div id="gridmap-dialog-body"></div><p id="gridmap-dialog-error" class="field-error" role="alert" hidden></p><div class="dialog-actions"><button id="gridmap-dialog-cancel" type="button" class="button secondary">取消</button><button id="gridmap-dialog-confirm" type="submit" class="button primary">保存</button></div></form></dialog>
+  <dialog id="screenshot-dialog" class="app-dialog screenshot-dialog" aria-labelledby="screenshot-dialog-title"><div class="dialog-heading"><h2 id="screenshot-dialog-title">截图详情</h2><button id="screenshot-dialog-close" class="icon-button" aria-label="关闭截图预览">×</button></div><p id="screenshot-dialog-meta" class="muted"></p><div class="screenshot-preview"><img id="screenshot-dialog-image" alt="截图原图"></div><div class="dialog-actions"><button id="screenshot-dialog-copy" class="button secondary">复制图片</button><button id="screenshot-dialog-cancel" class="button primary">关闭</button></div></dialog>
 </body>
 </html>

@@ -11,6 +11,7 @@
     <file alias="wallpaper-layout.js">../web/wallpaper-layout.js</file>
     <file alias="gridmap.js">../web/gridmap.js</file>
     <file alias="qr.js">../web/qr.js</file>
+    <file alias="screenshot.js">../web/screenshot.js</file>
     <file alias="app.js">../web/app.js</file>
   </qresource>
   <qresource prefix="/images">

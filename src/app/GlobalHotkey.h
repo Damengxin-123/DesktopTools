@@ -8,8 +8,8 @@ class GlobalHotkey final : public QObject, public QAbstractNativeEventFilter
 {
     Q_OBJECT
 public:
-    // 安装原生事件过滤器；测试可关闭系统注册。
-    explicit GlobalHotkey(bool enabled = true, QObject* parent = nullptr);
+    // 安装原生事件过滤器；测试可关闭系统注册。idBase 区分多个热键实例的系统注册 ID。
+    explicit GlobalHotkey(bool enabled = true, int idBase = 0x4D01, QObject* parent = nullptr);
     // 释放系统注册并移除事件过滤器。
     ~GlobalHotkey() override;
     // 尝试原子切换热键；失败时保留原来的热键。
@@ -24,6 +24,8 @@ public:
     int modifier() const { return m_modifier; }
     // 读取当前成功注册的虚拟键。
     int key() const { return m_key; }
+    // 读取本实例的系统注册 ID 段起点，用于区分多个热键实例。
+    int idBase() const { return m_idBase; }
 signals:
     // 用户按下已注册的热键。
     void activated();
@@ -33,6 +35,8 @@ protected:
 private:
     // 是否真正调用系统注册接口。
     bool m_enabled;
+    // 本实例使用的系统注册 ID 段起点（预留相邻的 +1 作为切换备用 ID）。
+    int m_idBase;
     // 当前注册 ID，零表示尚未注册。
     int m_id = 0;
     // 当前成功注册的修饰键位掩码。

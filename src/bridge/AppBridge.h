@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QObject>
+#include <QPointer>
 #include <QVariantMap>
 #include <QStringList>
 
@@ -14,7 +15,12 @@ class ShortcutService;
 class WallpaperService;
 class GridMapService;
 class QrService;
+class ScreenshotService;
+class ScreenshotOverlay;
+class QImage;
 class QWidget;
+
+template<typename T> class QPointer;
 
 // HTML 页面的唯一原生接口，转发业务操作并处理系统交互。
 class AppBridge final : public QObject
@@ -109,6 +115,22 @@ public:
     Q_INVOKABLE QVariantMap removeQrHistory(const QStringList& ids);
     // 清空识别历史。
     Q_INVOKABLE QVariantMap clearQrHistory();
+    // 触发一次交互式截图（全屏遮罩选区并标注），完成后写入剪贴板与历史。
+    Q_INVOKABLE QVariantMap startScreenshot();
+    // 校验并保存截图热键，注册成功后写入设置，失败时回滚注册。
+    Q_INVOKABLE QVariantMap saveScreenshotHotkey(int modifier, int key);
+    // 返回截图历史摘要（缩略图、时间、尺寸与大小）。
+    Q_INVOKABLE QVariantMap getScreenshotHistory() const;
+    // 读取完整截图记录，包含原图数据地址。
+    Q_INVOKABLE QVariantMap getScreenshot(const QString& id) const;
+    // 批量删除截图历史及其 PNG 文件。
+    Q_INVOKABLE QVariantMap deleteScreenshots(const QStringList& ids);
+    // 清空截图历史与文件。
+    Q_INVOKABLE QVariantMap clearScreenshotHistory();
+    // 打开截图文件所在目录。
+    Q_INVOKABLE QVariantMap openScreenshotDirectory(const QString& id);
+    // 把历史中的截图重新复制到系统剪贴板。
+    Q_INVOKABLE QVariantMap copyScreenshot(const QString& id);
     // 显示原生媒体选择器，返回路径和是否取消的标志。
     Q_INVOKABLE QVariantMap chooseWallpaperResource();
     // 把当前剪贴板中的图像或复制的单个文件转换为壁纸资源路径。
@@ -196,6 +218,8 @@ signals:
     void gridMapsChanged();
     // 二维码识别历史已持久化。
     void qrHistoryChanged();
+    // 截图历史已持久化。
+    void screenshotsChanged();
     // 热键请求唤醒主窗口。
     void activateWindowRequested();
 private:
@@ -221,8 +245,24 @@ private:
     GridMapService* m_gridmaps;
     // 二维码识别历史服务。
     QrService* m_qr;
+    // 截图历史服务。
+    ScreenshotService* m_screenshots;
+    // 截图全局热键注册器。
+    GlobalHotkey* m_screenshotHotkey;
+    // 启动时截图热键注册失败的说明。
+    QString m_screenshotHotkeyWarning;
+    // 正在显示的截图遮罩；确认或取消后置空。
+    QPointer<ScreenshotOverlay> m_overlay;
+    // 截图流程进行中，避免重复触发。
+    bool m_screenshotBusy = false;
+    // 是否启用系统级交互（热键注册、截屏遮罩）。
+    bool m_nativeIntegration;
     // 全局热键注册器。
     GlobalHotkey* m_hotkey;
     // 启动时热键注册失败的说明。
     QString m_hotkeyWarning;
+    // 隐藏主窗口后抓取桌面并显示遮罩；完成后恢复剪贴板、历史与窗口。
+    void beginScreenshot(bool restoreWindow);
+    // 抓取整个虚拟桌面的图像。
+    QImage grabDesktopImage() const;
 };

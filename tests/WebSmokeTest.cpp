@@ -3,6 +3,7 @@
 #include "bridge/AppBridge.h"
 #include "services/ClipboardService.h"
 #include "services/EmojiService.h"
+#include "services/ScreenshotService.h"
 #include "DownloadPageServer.h"
 #include "TorrentTestPeer.h"
 
@@ -53,6 +54,8 @@ private slots:
     void wallpaperThroughPage();
     // 验证二维码页：剪贴板粘贴、识别、复制结果与历史管理。
     void qrThroughPage();
+    // 验证截图页：历史列表、复制、删除、预览与热键保存。
+    void screenshotsThroughPage();
 private:
     // 同步等待一次短 JavaScript 求值，带超时防止测试挂起。
     static QVariant evaluate(QWebEnginePage* page, const QString& source);
@@ -86,6 +89,12 @@ void WebSmokeTest::settingsTransaction()
     QVERIFY(!failed.value("ok").toBool());
     QCOMPARE(bridge.getSettings().value("data").toMap(), previous);
     auto* active = bridge.findChild<GlobalHotkey*>();
+    QVERIFY(active);
+    // 桥接持有主窗口与截图两个热键，定位主窗口热键实例后再断言。
+    for (GlobalHotkey* hotkey : bridge.findChildren<GlobalHotkey*>()) {
+        if (hotkey->idBase() == 0x4D01)
+            active = hotkey;
+    }
     QVERIFY(active);
     QCOMPARE(active->key(), previous.value("hotkeyKey").toInt());
     QCOMPARE(active->modifier(), previous.value("hotkeyModifier").toInt());
@@ -641,6 +650,78 @@ void WebSmokeTest::qrThroughPage()
     QTRY_COMPARE(evaluate(page, QStringLiteral("document.querySelectorAll('.qr-row').length")).toInt(), 0);
     QCOMPARE(evaluate(page, QStringLiteral("document.querySelector('#qr-result').value")).toString(),
         QStringLiteral("https://example.com/hello"));
+}
+
+void WebSmokeTest::screenshotsThroughPage()
+{
+    QTemporaryDir directory;
+    WebWindow window(directory.path(), false);
+    window.show();
+    auto* page = window.webView()->page();
+    auto* bridge = window.findChild<AppBridge*>();
+    QVERIFY(bridge);
+    auto* service = window.findChild<ScreenshotService*>();
+    QVERIFY(service);
+    QTRY_VERIFY_WITH_TIMEOUT(evaluate(page, QStringLiteral("document.documentElement.dataset.ready === 'true'")).toBool(), 20000);
+    evaluate(page, QStringLiteral("document.querySelector('[data-page=screenshot]').click(); true"));
+    QVERIFY(evaluate(page, QStringLiteral("!document.querySelector('#page-screenshot').hidden")).toBool());
+
+    // 非原生环境点击“开始截图”必须给出明确错误提示。
+    evaluate(page, QStringLiteral("document.querySelector('#screenshot-start').click(); true"));
+    QTRY_VERIFY_WITH_TIMEOUT(evaluate(page, QStringLiteral("document.querySelector('#toast-region').textContent.includes('不支持截图')")).toBool(), 10000);
+
+    // 通过真实服务写入历史，页面依靠变更信号刷新。
+    QImage image(640, 400, QImage::Format_RGB32);
+    image.fill(QColor("#3d78c8"));
+    QPainter painter(&image);
+    painter.fillRect(80, 80, 200, 120, QColor("#f7d36d"));
+    painter.end();
+    const QString capturedAt = QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs);
+    QVERIFY(service->add(image, capturedAt).value("ok").toBool());
+    QTRY_COMPARE(evaluate(page, QStringLiteral("document.querySelectorAll('.screenshot-row').length")).toInt(), 1);
+    QTRY_VERIFY(evaluate(page, QStringLiteral("document.querySelector('.screenshot-thumb').naturalWidth > 0")).toBool());
+    QVERIFY(evaluate(page, QStringLiteral("document.querySelector('.screenshot-row-title').textContent.length > 0")).toBool());
+
+    // 复制把截图写回系统剪贴板。
+    evaluate(page, QStringLiteral("document.querySelector('.screenshot-row-actions .button').click(); true"));
+    QTRY_COMPARE(QGuiApplication::clipboard()->image().size(), QSize(640, 400));
+
+    // 缩略图点击打开预览弹窗并显示原图。
+    evaluate(page, QStringLiteral("document.querySelector('.screenshot-thumb').click(); true"));
+    QTRY_VERIFY(evaluate(page, QStringLiteral("document.querySelector('#screenshot-dialog').open")).toBool());
+    QTRY_VERIFY(evaluate(page, QStringLiteral("document.querySelector('#screenshot-dialog-image').naturalWidth === 640")).toBool());
+    evaluate(page, QStringLiteral("document.querySelector('#screenshot-dialog-cancel').click(); true"));
+    QTRY_VERIFY(evaluate(page, QStringLiteral("!document.querySelector('#screenshot-dialog').open")).toBool());
+
+    // 删除记录后列表清空，清空入口随之禁用。
+    const auto buttons = evaluate(page, QStringLiteral("document.querySelectorAll('.screenshot-row-actions .button').length")).toInt();
+    QCOMPARE(buttons, 3);
+    evaluate(page, QStringLiteral("document.querySelectorAll('.screenshot-row-actions .button')[2].click(); true"));
+    QTRY_COMPARE(evaluate(page, QStringLiteral("document.querySelectorAll('.screenshot-row').length")).toInt(), 0);
+    QVERIFY(evaluate(page, QStringLiteral("!document.querySelector('#screenshot-empty').hidden")).toBool());
+    QVERIFY(evaluate(page, QStringLiteral("document.querySelector('#screenshot-clear').disabled")).toBool());
+
+    const QString capturePath = qEnvironmentVariable("DESKTOPTOOL_SCREENSHOT_CAPTURE");
+    if (!capturePath.isEmpty()) {
+        // 种子两条记录供人工核对列表与缩略图展示。
+        QImage second(500, 300, QImage::Format_RGB32);
+        second.fill(QColor("#37a356"));
+        QVERIFY(service->add(second, QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)).value("ok").toBool());
+        QVERIFY(service->add(image, QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)).value("ok").toBool());
+        QTRY_COMPARE(evaluate(page, QStringLiteral("document.querySelectorAll('.screenshot-row').length")).toInt(), 2);
+        window.resize(1180, 960);
+        QTest::qWait(500);
+        QVERIFY(window.grab().save(capturePath));
+    }
+
+    // 热键保存写回设置并刷新显示。
+    evaluate(page, QStringLiteral("window.desktopBridge.call('saveScreenshotHotkey', 6, 83)"
+        ".then(() => { window.__hotkeySaved = true; }, (error) => { window.__hotkeySaved = error.message; }); true"));
+    QTRY_VERIFY_WITH_TIMEOUT(evaluate(page, QStringLiteral("window.__hotkeySaved === true")).toBool(), 10000);
+    QTRY_COMPARE(evaluate(page, QStringLiteral("document.querySelector('#screenshot-hotkey-input').value")).toString(),
+        QStringLiteral("Ctrl+Shift+S"));
+    QCOMPARE(bridge->getSettings().value("data").toMap().value("screenshotHotkeyKey").toInt(), 83);
+    QCOMPARE(bridge->getSettings().value("data").toMap().value("screenshotHotkeyModifier").toInt(), 6);
 }
 
 // 初始化测试用 Qt 应用；不会启用托盘、系统热键或单实例服务。

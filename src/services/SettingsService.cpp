@@ -66,6 +66,12 @@ QString checkDownloadDirectory(const QString& path)
         return QStringLiteral("下载目录无法写入，请检查权限或选择其他目录。");
     return {};
 }
+// 只允许为修饰键的虚拟键码，两类热键共用。
+bool isModifierOnlyKey(int key)
+{
+    return key == 0x10 || key == 0x11 || key == 0x12 || key == 0x5B || key == 0x5C
+        || (key >= 0xA0 && key <= 0xA5);
+}
 }
 
 SettingsService::SettingsService(const QString& dataRoot, QObject* parent, QSettings* startupSettings)
@@ -114,6 +120,10 @@ QVariantMap SettingsService::data() const
              ? m_document.value(QStringLiteral("hotkey_modifier")).toVariant() : QVariant(0)},
         {QStringLiteral("hotkeyKey"), m_document.contains(QStringLiteral("hotkey_key"))
              ? m_document.value(QStringLiteral("hotkey_key")).toVariant() : QVariant(0x77)},
+        {QStringLiteral("screenshotHotkeyModifier"), m_document.contains(QStringLiteral("screenshot_hotkey_modifier"))
+             ? m_document.value(QStringLiteral("screenshot_hotkey_modifier")).toVariant() : QVariant(3)},
+        {QStringLiteral("screenshotHotkeyKey"), m_document.contains(QStringLiteral("screenshot_hotkey_key"))
+             ? m_document.value(QStringLiteral("screenshot_hotkey_key")).toVariant() : QVariant(0x41)},
         {QStringLiteral("downloadDirectory"), m_document.contains(QStringLiteral("download_directory"))
              ? m_document.value(QStringLiteral("download_directory")).toVariant() : QVariant(defaultDownloadDirectory())}
     };
@@ -136,14 +146,21 @@ QVariantMap SettingsService::validateValues(const QVariantMap& settings, bool ch
     if (!integerValue(settings.value(QStringLiteral("hotkeyKey")), 1, 254))
         return ServiceResult::failure(QStringLiteral("热键必须使用有效的虚拟键码。"));
     const int key = settings.value(QStringLiteral("hotkeyKey")).toInt();
-    if (key == 0x10 || key == 0x11 || key == 0x12 || key == 0x5B || key == 0x5C
-        || (key >= 0xA0 && key <= 0xA5))
+    if (isModifierOnlyKey(key))
         return ServiceResult::failure(QStringLiteral("热键不能只包含 Ctrl、Alt、Shift 或 Win 修饰键。"));
+    if (!integerValue(settings.value(QStringLiteral("screenshotHotkeyModifier")), 0, 15))
+        return ServiceResult::failure(QStringLiteral("截图热键修饰组合必须为 0 至 15 的整数。"));
+    if (!integerValue(settings.value(QStringLiteral("screenshotHotkeyKey")), 1, 254))
+        return ServiceResult::failure(QStringLiteral("截图热键必须使用有效的虚拟键码。"));
+    if (isModifierOnlyKey(settings.value(QStringLiteral("screenshotHotkeyKey")).toInt()))
+        return ServiceResult::failure(QStringLiteral("截图热键不能只包含 Ctrl、Alt、Shift 或 Win 修饰键。"));
     for (auto iterator = settings.cbegin(); iterator != settings.cend(); ++iterator)
     {
         if (iterator.key() != QStringLiteral("fontSize") && iterator.key() != QStringLiteral("hotkeyModifier")
             && iterator.key() != QStringLiteral("hotkeyKey") && iterator.key() != QStringLiteral("downloadDirectory")
-            && iterator.key() != QStringLiteral("autoStart"))
+            && iterator.key() != QStringLiteral("autoStart")
+            && iterator.key() != QStringLiteral("screenshotHotkeyModifier")
+            && iterator.key() != QStringLiteral("screenshotHotkeyKey"))
             return ServiceResult::failure(QStringLiteral("未知的设置字段：%1").arg(iterator.key()));
     }
     if (settings.contains(QStringLiteral("downloadDirectory"))
@@ -166,6 +183,8 @@ QVariantMap SettingsService::validateValues(const QVariantMap& settings, bool ch
         {QStringLiteral("fontSize"), settings.value(QStringLiteral("fontSize")).toInt()},
         {QStringLiteral("hotkeyModifier"), settings.value(QStringLiteral("hotkeyModifier")).toInt()},
         {QStringLiteral("hotkeyKey"), key},
+        {QStringLiteral("screenshotHotkeyModifier"), settings.value(QStringLiteral("screenshotHotkeyModifier")).toInt()},
+        {QStringLiteral("screenshotHotkeyKey"), settings.value(QStringLiteral("screenshotHotkeyKey")).toInt()},
         {QStringLiteral("downloadDirectory"), directory}
     });
 }
@@ -191,6 +210,8 @@ QVariantMap SettingsService::save(const QVariantMap& settings)
     document.insert(QStringLiteral("tree_view_font_size"), candidate.value(QStringLiteral("fontSize")).toInt());
     document.insert(QStringLiteral("hotkey_modifier"), candidate.value(QStringLiteral("hotkeyModifier")).toInt());
     document.insert(QStringLiteral("hotkey_key"), candidate.value(QStringLiteral("hotkeyKey")).toInt());
+    document.insert(QStringLiteral("screenshot_hotkey_modifier"), candidate.value(QStringLiteral("screenshotHotkeyModifier")).toInt());
+    document.insert(QStringLiteral("screenshot_hotkey_key"), candidate.value(QStringLiteral("screenshotHotkeyKey")).toInt());
     document.insert(QStringLiteral("download_directory"), candidate.value(QStringLiteral("downloadDirectory")).toString());
     if (!QDir().mkpath(QFileInfo(m_path).absolutePath()))
         return ServiceResult::failure(QStringLiteral("无法创建设置目录。"));

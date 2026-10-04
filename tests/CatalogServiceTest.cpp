@@ -234,9 +234,19 @@ bool settingsCompatibility()
     REQUIRE(!ok(service.save({{QStringLiteral("hotkeyKey"), 255}})));
     REQUIRE(!ok(service.save({{QStringLiteral("hotkeyKey"), 0}})));
     REQUIRE(!ok(service.save({{QStringLiteral("hotkeyKey"), 0xA2}})));
+    REQUIRE(!ok(service.save({{QStringLiteral("screenshotHotkeyModifier"), 16}})));
+    REQUIRE(!ok(service.save({{QStringLiteral("screenshotHotkeyKey"), 0}})));
+    REQUIRE(!ok(service.save({{QStringLiteral("screenshotHotkeyKey"), 0x11}})));
     REQUIRE(!ok(service.save({{QStringLiteral("unknown"), 1}})));
     REQUIRE(readFile(path) == beforeFailure);
     REQUIRE(changes == 1);
+    REQUIRE(resultData(service.snapshot()).value(QStringLiteral("screenshotHotkeyModifier")).toInt() == 3);
+    REQUIRE(resultData(service.snapshot()).value(QStringLiteral("screenshotHotkeyKey")).toInt() == 0x41);
+    REQUIRE(ok(service.save({{QStringLiteral("screenshotHotkeyModifier"), 5},
+        {QStringLiteral("screenshotHotkeyKey"), 0x53}})));
+    REQUIRE(changes == 2);
+    REQUIRE(resultData(service.snapshot()).value(QStringLiteral("screenshotHotkeyModifier")).toInt() == 5);
+    REQUIRE(QJsonDocument::fromJson(readFile(path)).object().value(QStringLiteral("screenshot_hotkey_key")).toInt() == 0x53);
     SettingsService reopened(directory.path());
     REQUIRE(reopened.snapshot() == service.snapshot());
     REQUIRE(!ok(SettingsService::validate({{QStringLiteral("fontSize"), 16}})));

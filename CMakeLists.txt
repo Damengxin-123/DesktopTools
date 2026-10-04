@@ -27,7 +27,9 @@ add_library(DesktopToolCore STATIC
     src/services/GridMapService.h src/services/GridMapService.cpp
     src/services/QrDecoder.h src/services/QrDecoder.cpp
     src/services/QrService.h src/services/QrService.cpp
+    src/services/ScreenshotService.h src/services/ScreenshotService.cpp
     src/app/GlobalHotkey.h src/app/GlobalHotkey.cpp
+    src/app/ScreenshotOverlay.h src/app/ScreenshotOverlay.cpp
     src/app/WallpaperWindow.h src/app/WallpaperWindow.cpp
     src/app/WebWindow.h src/app/WebWindow.cpp
     src/bridge/AppBridge.h src/bridge/AppBridge.cpp
@@ -83,6 +85,10 @@ if(BUILD_TESTING)
     target_compile_definitions(QrServiceTest PRIVATE TEST_QR_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/media")
     add_test(NAME qr-service COMMAND QrServiceTest)
     set_tests_properties(qr-service PROPERTIES TIMEOUT 60 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    add_executable(ScreenshotServiceTest tests/ScreenshotServiceTest.cpp)
+    target_link_libraries(ScreenshotServiceTest PRIVATE DesktopToolCore Qt6::Test)
+    add_test(NAME screenshot-service COMMAND ScreenshotServiceTest)
+    set_tests_properties(screenshot-service PROPERTIES TIMEOUT 60 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     add_executable(WallpaperVideoTest tests/WallpaperVideoTest.cpp resources/app.qrc)
     target_link_libraries(WallpaperVideoTest PRIVATE DesktopToolCore Qt6::Test)
     target_compile_definitions(WallpaperVideoTest PRIVATE TEST_VIDEO_FILE="${CMAKE_CURRENT_SOURCE_DIR}/tests/media/wallpaper-h264.mp4")
@@ -109,5 +115,5 @@ if(BUILD_TESTING)
     target_link_libraries(WebSmokeTest PRIVATE DesktopToolCore Qt6::Test LibtorrentRasterbar::torrent-rasterbar)
     target_compile_definitions(WebSmokeTest PRIVATE TEST_QR_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/media")
     add_test(NAME web-integration COMMAND WebSmokeTest)
-    set_tests_properties(web-integration PROPERTIES TIMEOUT 90 ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QTWEBENGINE_CHROMIUM_FLAGS=--disable-gpu")
+    set_tests_properties(web-integration PROPERTIES TIMEOUT 240 ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QTWEBENGINE_CHROMIUM_FLAGS=--disable-gpu")
 endif()
