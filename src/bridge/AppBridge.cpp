@@ -5,6 +5,7 @@
 #include "services/ClipboardService.h"
 #include "services/EmojiService.h"
 #include "services/NoteService.h"
+#include "services/QrService.h"
 #include "services/ServiceResult.h"
 #include "services/SettingsService.h"
 #include "services/ShortcutService.h"
@@ -18,6 +19,7 @@
 #include <QFileInfo>
 #include <QImageReader>
 #include <QJsonValue>
+#include <QMimeData>
 #include <QSaveFile>
 #include <QSettings>
 #include <QStandardPaths>
@@ -28,6 +30,10 @@ namespace
 {
 // 网格图导出数据允许的最大 base64 长度。
 constexpr qint64 MaximumGridPngChars = 96 * 1024 * 1024;
+// 二维码图片数据地址与像素上限，与剪贴板服务保持一致的防护边界。
+constexpr qint64 MaximumImageDataUrlChars = 16 * 1024 * 1024;
+constexpr qint64 MaximumImagePixels = 20000000;
+constexpr qint64 MaximumClipboardImageBytes = 8 * 1024 * 1024;
 
 // 把网页提交的 PNG 数据地址转换为图像；格式或大小不符时返回空图像。
 QImage decodeGridPng(const QString& imageDataUrl)
@@ -71,6 +77,7 @@ AppBridge::AppBridge(const QString& dataRoot, QWidget* window, bool nativeIntegr
       m_emoji(new EmojiService(m_dataRoot, m_clipboard, this)),
       m_wallpaper(new WallpaperService(m_dataRoot, nativeIntegration, this)),
       m_gridmaps(new GridMapService(m_dataRoot, this)),
+      m_qr(new QrService(m_dataRoot, this)),
       m_hotkey(new GlobalHotkey(nativeIntegration, this))
 {
     connect(m_shortcuts, &ShortcutService::changed, this, &AppBridge::shortcutsChanged);
@@ -81,6 +88,7 @@ AppBridge::AppBridge(const QString& dataRoot, QWidget* window, bool nativeIntegr
     connect(m_emoji, &EmojiService::changed, this, &AppBridge::emojisChanged);
     connect(m_wallpaper, &WallpaperService::changed, this, &AppBridge::wallpaperChanged);
     connect(m_gridmaps, &GridMapService::changed, this, &AppBridge::gridMapsChanged);
+    connect(m_qr, &QrService::changed, this, &AppBridge::qrHistoryChanged);
     connect(m_hotkey, &GlobalHotkey::activated, this, &AppBridge::activateWindowRequested);
     const auto result = m_settings->snapshot();
     if (result.value("ok").toBool()) {
@@ -230,6 +238,86 @@ QVariantMap AppBridge::copyGridMapPng(const QString& imageDataUrl)
         return ServiceResult::failure(QStringLiteral("网格图导出数据无效或过大，请重试。"));
     QApplication::clipboard()->setImage(image);
     return ServiceResult::success();
+}
+
+QVariantMap AppBridge::getQrHistory() const { return m_qr->snapshot(); }
+QVariantMap AppBridge::readQr(const QString& id) const { return m_qr->read(id); }
+QVariantMap AppBridge::removeQrHistory(const QStringList& ids) { return m_qr->remove(ids); }
+QVariantMap AppBridge::clearQrHistory() { return m_qr->clear(); }
+
+// 显示原生图片选择器并把所选图片编码为可显示的数据地址。
+QVariantMap AppBridge::chooseQrImage()
+{
+    QStringList patterns;
+    for (const auto& format : QImageReader::supportedImageFormats())
+        patterns.append(QStringLiteral("*.") + QString::fromLatin1(format));
+    const QString path = QFileDialog::getOpenFileName(m_window, QStringLiteral("选择二维码图片"), QString(),
+        QStringLiteral("图片文件 (%1)").arg(patterns.join(QLatin1Char(' '))));
+    if (path.isEmpty())
+        return ServiceResult::success(QVariantMap{{"cancelled", true}});
+    QImageReader reader(path);
+    reader.setDecideFormatFromContent(true);
+    // 在解码前检查尺寸，避免超大图片占用过多内存。
+    const QSize size = reader.size();
+    if (size.isValid() && qint64(size.width()) * size.height() > MaximumImagePixels)
+        return ServiceResult::failure(QStringLiteral("图片超过 2000 万像素，请缩小后再使用。"));
+    reader.setAutoTransform(true);
+    const QImage image = reader.read();
+    if (image.isNull())
+        return ServiceResult::failure(QStringLiteral("图片无法读取或格式不支持。"));
+    const QString encoded = QrService::encodeBoundedImage(image);
+    if (encoded.isEmpty())
+        return ServiceResult::failure(QStringLiteral("图片过大或无法编码，请缩小后再使用。"));
+    return ServiceResult::success(QVariantMap{{"image", encoded}, {"title", QFileInfo(path).fileName()}});
+}
+
+// 读取系统剪贴板中的图片，优先标准图像格式，兼容仅提供 PNG/JPEG 数据的程序。
+QVariantMap AppBridge::pasteQrImage()
+{
+    const QMimeData* mime = QGuiApplication::clipboard()->mimeData();
+    if (!mime)
+        return ServiceResult::failure(QStringLiteral("剪贴板暂时无法读取，请重试。"));
+    QImage image = qvariant_cast<QImage>(mime->imageData());
+    if (image.isNull()) {
+        const QVariant data = mime->imageData();
+        if (data.canConvert<QPixmap>())
+            image = qvariant_cast<QPixmap>(data).toImage();
+    }
+    for (const QString& format : {QStringLiteral("image/png"), QStringLiteral("image/jpeg"),
+             QStringLiteral("application/x-qt-windows-mime;value=\"PNG\"")}) {
+        if (!image.isNull() || !mime->hasFormat(format))
+            continue;
+        const QByteArray bytes = mime->data(format);
+        if (bytes.isEmpty() || bytes.size() > MaximumClipboardImageBytes)
+            continue;
+        image = QImage::fromData(bytes);
+    }
+    if (image.isNull())
+        return ServiceResult::failure(QStringLiteral("剪贴板中没有可用的图片，请先复制二维码图片。"));
+    if (qint64(image.width()) * image.height() > MaximumImagePixels)
+        return ServiceResult::failure(QStringLiteral("剪贴板图像超过 2000 万像素，请缩小后再使用。"));
+    const QString encoded = QrService::encodeBoundedImage(image);
+    if (encoded.isEmpty())
+        return ServiceResult::failure(QStringLiteral("图片过大或无法编码，请缩小后再使用。"));
+    return ServiceResult::success(QVariantMap{{"image", encoded}});
+}
+
+// 识别网页回传的二维码图片并记入历史。
+QVariantMap AppBridge::decodeQr(const QString& imageDataUrl, const QString& source)
+{
+    if (imageDataUrl.size() > MaximumImageDataUrlChars)
+        return ServiceResult::failure(QStringLiteral("图片数据过大，无法识别。"));
+    const QString marker = QStringLiteral(";base64,");
+    const qsizetype markerIndex = imageDataUrl.indexOf(marker, 0, Qt::CaseInsensitive);
+    if (!imageDataUrl.startsWith(QStringLiteral("data:image/"), Qt::CaseInsensitive) || markerIndex < 0)
+        return ServiceResult::failure(QStringLiteral("图片数据格式无效。"));
+    const QByteArray bytes = QByteArray::fromBase64(imageDataUrl.mid(markerIndex + marker.size()).toLatin1());
+    const QImage image = QImage::fromData(bytes);
+    if (image.isNull())
+        return ServiceResult::failure(QStringLiteral("图片无法读取或格式不支持。"));
+    if (qint64(image.width()) * image.height() > MaximumImagePixels)
+        return ServiceResult::failure(QStringLiteral("图片超过 2000 万像素，请缩小后再使用。"));
+    return m_qr->decode(image, source);
 }
 
 QVariantMap AppBridge::getNote(const QString& id) const { return m_notes->readNote(id); }

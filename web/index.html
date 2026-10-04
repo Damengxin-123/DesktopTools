@@ -14,6 +14,7 @@
   <script defer src="wallpaper.js"></script>
   <script defer src="wallpaper-layout.js"></script>
   <script defer src="gridmap.js"></script>
+  <script defer src="qr.js"></script>
   <script defer src="app.js"></script>
 </head>
 <body>
@@ -29,6 +30,7 @@
         <button class="nav-button" data-page="clipboard"><span aria-hidden="true">▣</span>剪贴板<span class="nav-count" id="clipboard-count">0</span></button>
         <button class="nav-button" data-page="wallpaper"><span aria-hidden="true">❋</span>壁纸<span class="nav-count" id="wallpaper-count">0</span></button>
 <button class="nav-button" data-page="gridmap"><span aria-hidden="true">▦</span>网格图<span class="nav-count" id="gridmap-count">0</span></button>
+        <button class="nav-button" data-page="qr"><span aria-hidden="true">▩</span>二维码<span class="nav-count" id="qr-count">0</span></button>
         <button class="nav-button" data-page="settings"><span aria-hidden="true">⚙</span>设置</button>
       </nav>
       <div class="sidebar-bottom"><span class="status-dot" id="connection-dot"></span><span id="connection-status">正在连接桌面程序…</span><span class="version" id="app-version"></span></div>
@@ -166,6 +168,36 @@
                 <div class="gridmap-canvas-wrap"><canvas id="gridmap-canvas"></canvas></div>
                 <footer class="gridmap-status"><span id="gridmap-pos">坐标 —</span><span id="gridmap-zoom">缩放 100%</span><span id="gridmap-cells">0 格</span><span id="gridmap-save-state" class="muted" role="status">已保存</span><span class="gridmap-hint">左键涂色 · Alt+点击吸色 · 按住空格框选 · 右键拖动 · 滚轮缩放 · Ctrl+Z 撤销 · Ctrl+S 保存</span></footer>
               </div>
+            </div>
+          </div>
+        </section>
+        <section class="page qr-page" id="page-qr" aria-labelledby="qr-heading" hidden>
+          <header class="page-header"><div><div class="eyebrow">QR CODE READER</div><h1 id="qr-heading">二维码识别</h1><p>打开本地图片或粘贴剪贴板二维码，一键识别内容并随时复制。</p></div></header>
+          <div id="qr-error" class="notice warning" role="alert" hidden></div>
+          <div class="qr-layout">
+            <aside class="qr-browser" aria-label="识别历史">
+              <div class="qr-browser-heading"><strong>识别历史</strong><span id="qr-history-count" class="muted">0 条</span></div>
+              <div id="qr-history" class="qr-history-list"></div>
+            </aside>
+            <div class="qr-stage">
+              <div class="qr-toolbar" role="toolbar" aria-label="二维码识别工具">
+                <button id="qr-open" class="button primary"><span aria-hidden="true">＋</span>打开本地图片</button>
+                <button id="qr-paste" class="button secondary">从剪贴板粘贴</button>
+                <span class="toolbar-separator" aria-hidden="true"></span>
+                <button id="qr-decode" class="button primary" disabled>识别</button>
+                <button id="qr-clear-image" class="button quiet" disabled>清除图片</button>
+                <span id="qr-image-state" class="muted" role="status"></span>
+              </div>
+              <div class="qr-image-wrap">
+                <div id="qr-image-empty" class="empty-state"><div class="empty-icon" aria-hidden="true">▩</div><h2>还没有加载图片</h2><p>点击“打开本地图片”选择二维码图片，或复制图片后点击“从剪贴板粘贴”。</p></div>
+                <img id="qr-image" class="qr-image" alt="二维码图片" hidden>
+              </div>
+              <div class="qr-result-row">
+                <label class="sr-only" for="qr-result">识别结果</label>
+                <textarea id="qr-result" readonly placeholder="识别结果会显示在这里"></textarea>
+                <button id="qr-copy" class="button secondary" disabled>复制</button>
+              </div>
+              <footer class="qr-status"><span>支持旋转、反色与常见截图；识别成功的记录自动保存在左侧历史中，最多保留 100 条。</span></footer>
             </div>
           </div>
         </section>

@@ -51,6 +51,8 @@ private slots:
     void damagedEmojiLibraryIsIsolated();
     // 验证屏幕示意图、切换目标、单屏应用和恢复系统壁纸的真实桥接。
     void wallpaperThroughPage();
+    // 验证二维码页：剪贴板粘贴、识别、复制结果与历史管理。
+    void qrThroughPage();
 private:
     // 同步等待一次短 JavaScript 求值，带超时防止测试挂起。
     static QVariant evaluate(QWebEnginePage* page, const QString& source);
@@ -576,6 +578,69 @@ void WebSmokeTest::wallpaperThroughPage()
         QTest::qWait(200);
         QVERIFY(window.grab().save(screenshot));
     }
+}
+
+void WebSmokeTest::qrThroughPage()
+{
+    QTemporaryDir directory;
+    WebWindow window(directory.path(), false);
+    window.show();
+    auto* page = window.webView()->page();
+    auto* bridge = window.findChild<AppBridge*>();
+    QVERIFY(bridge);
+    QTRY_VERIFY_WITH_TIMEOUT(evaluate(page, QStringLiteral("document.documentElement.dataset.ready === 'true'")).toBool(), 20000);
+    evaluate(page, QStringLiteral("document.querySelector('[data-page=qr]').click(); true"));
+    QVERIFY(evaluate(page, QStringLiteral("!document.querySelector('#page-qr').hidden")).toBool());
+    QVERIFY(evaluate(page, QStringLiteral("document.querySelector('#qr-decode').disabled")).toBool());
+
+    // 把二维码测试图放入系统剪贴板，模拟用户复制图片后粘贴。
+    const QImage fixture(QString(TEST_QR_DIR) + QStringLiteral("/qr-v2-m-url.png"));
+    QVERIFY(!fixture.isNull());
+    auto* picture = new QMimeData;
+    picture->setImageData(fixture);
+    QGuiApplication::clipboard()->setMimeData(picture);
+    evaluate(page, QStringLiteral("document.querySelector('#qr-paste').click(); true"));
+    QTRY_VERIFY_WITH_TIMEOUT(evaluate(page, QStringLiteral("!document.querySelector('#qr-image').hidden")).toBool(), 10000);
+    QVERIFY(!evaluate(page, QStringLiteral("document.querySelector('#qr-decode').disabled")).toBool());
+
+    // 点击识别后，内容出现在只读文本框中并写入历史。
+    evaluate(page, QStringLiteral("document.querySelector('#qr-decode').click(); true"));
+    QTRY_COMPARE_WITH_TIMEOUT(evaluate(page, QStringLiteral("document.querySelector('#qr-result').value")).toString(),
+        QStringLiteral("https://example.com/hello"), 10000);
+    QTRY_COMPARE(evaluate(page, QStringLiteral("document.querySelectorAll('.qr-row').length")).toInt(), 1);
+    QTRY_VERIFY(evaluate(page, QStringLiteral("document.querySelector('.qr-thumb').naturalWidth > 0")).toBool());
+    QCOMPARE(bridge->getQrHistory().value("data").toMap().value("items").toList().size(), 1);
+
+    // 复制按钮把识别结果写回系统剪贴板。
+    evaluate(page, QStringLiteral("document.querySelector('#qr-copy').click(); true"));
+    QTRY_COMPARE(QGuiApplication::clipboard()->text(), QStringLiteral("https://example.com/hello"));
+
+    // 点击历史项回看完整记录。
+    evaluate(page, QStringLiteral("document.querySelector('.qr-row-preview').click(); true"));
+    QTRY_COMPARE(evaluate(page, QStringLiteral("document.querySelectorAll('.qr-row.active').length")).toInt(), 1);
+    const QString capturePath = qEnvironmentVariable("DESKTOPTOOL_QR_CAPTURE");
+    if (!capturePath.isEmpty()) {
+        // 离屏模式通过尺寸变化请求 Chromium 合成最新帧，避免截图空白。
+        window.resize(1180, 960);
+        QTest::qWait(500);
+        QVERIFY(window.grab().save(capturePath));
+    }
+
+    // 无法解码的内容返回明确错误，不产生历史记录。
+    evaluate(page, QStringLiteral("(() => { const canvas = document.createElement('canvas');"
+        "canvas.width = 160; canvas.height = 160;"
+        "const ctx = canvas.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, 160, 160);"
+        "window.desktopBridge.call('decodeQr', canvas.toDataURL('image/png'), '测试')"
+        ".then(() => { window.__qrRejected = 'accepted'; }, (error) => { window.__qrRejected = error.message; }); })(); true"));
+    QTRY_VERIFY_WITH_TIMEOUT(!evaluate(page, QStringLiteral("window.__qrRejected || null")).toString().isEmpty(), 10000);
+    QVERIFY(evaluate(page, QStringLiteral("String(window.__qrRejected).includes('二维码')")).toBool());
+    QCOMPARE(evaluate(page, QStringLiteral("document.querySelectorAll('.qr-row').length")).toInt(), 1);
+
+    // 删除历史记录后列表清空，查看区仍保留当前内容。
+    evaluate(page, QStringLiteral("document.querySelector('.qr-row .icon-button').click(); true"));
+    QTRY_COMPARE(evaluate(page, QStringLiteral("document.querySelectorAll('.qr-row').length")).toInt(), 0);
+    QCOMPARE(evaluate(page, QStringLiteral("document.querySelector('#qr-result').value")).toString(),
+        QStringLiteral("https://example.com/hello"));
 }
 
 // 初始化测试用 Qt 应用；不会启用托盘、系统热键或单实例服务。

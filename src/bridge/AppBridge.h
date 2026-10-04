@@ -13,6 +13,7 @@ class SettingsService;
 class ShortcutService;
 class WallpaperService;
 class GridMapService;
+class QrService;
 class QWidget;
 
 // HTML 页面的唯一原生接口，转发业务操作并处理系统交互。
@@ -94,6 +95,20 @@ public:
     Q_INVOKABLE QVariantMap exportGridMapPng(const QString& title, const QString& imageDataUrl);
     // 把网页渲染的 PNG 数据复制到系统剪贴板。
     Q_INVOKABLE QVariantMap copyGridMapPng(const QString& imageDataUrl);
+    // 返回二维码识别历史摘要。
+    Q_INVOKABLE QVariantMap getQrHistory() const;
+    // 显示原生图片选择器，返回二维码图片的数据地址。
+    Q_INVOKABLE QVariantMap chooseQrImage();
+    // 读取系统剪贴板中的图片，返回二维码图片的数据地址。
+    Q_INVOKABLE QVariantMap pasteQrImage();
+    // 识别二维码图片并把成功结果记入历史。
+    Q_INVOKABLE QVariantMap decodeQr(const QString& imageDataUrl, const QString& source);
+    // 读取完整识别记录，包含原图数据地址。
+    Q_INVOKABLE QVariantMap readQr(const QString& id) const;
+    // 批量删除识别历史。
+    Q_INVOKABLE QVariantMap removeQrHistory(const QStringList& ids);
+    // 清空识别历史。
+    Q_INVOKABLE QVariantMap clearQrHistory();
     // 显示原生媒体选择器，返回路径和是否取消的标志。
     Q_INVOKABLE QVariantMap chooseWallpaperResource();
     // 把当前剪贴板中的图像或复制的单个文件转换为壁纸资源路径。
@@ -179,6 +194,8 @@ signals:
     void wallpaperChanged();
     // 网格图项目或数据已持久化。
     void gridMapsChanged();
+    // 二维码识别历史已持久化。
+    void qrHistoryChanged();
     // 热键请求唤醒主窗口。
     void activateWindowRequested();
 private:
@@ -202,6 +219,8 @@ private:
     WallpaperService* m_wallpaper;
     // 网格图项目与栅格数据服务。
     GridMapService* m_gridmaps;
+    // 二维码识别历史服务。
+    QrService* m_qr;
     // 全局热键注册器。
     GlobalHotkey* m_hotkey;
     // 启动时热键注册失败的说明。

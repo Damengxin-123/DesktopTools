@@ -214,3 +214,32 @@
 /* 当前颜色指示：固定显示在常用颜色区最左侧，虚线描边区别于可选色块。 */
 .gridmap-current{width:22px;height:22px;border-radius:6px;border:1px solid #c9d2e3;padding:0;flex-shrink:0;outline:1px dashed #98a5ba;outline-offset:2px;margin-right:6px}
 .gridmap-current:hover{outline-color:var(--accent)}
+/* 二维码页：左侧识别历史 + 右侧图片与识别结果。 */
+.qr-layout{display:grid;grid-template-columns:260px minmax(0,1fr);gap:19px;height:calc(100vh - 212px);min-height:430px}
+.qr-browser{background:#fff;border:1px solid var(--line);border-radius:11px;overflow:hidden;display:flex;flex-direction:column;min-height:0}
+.qr-browser-heading{display:flex;align-items:center;justify-content:space-between;padding:13px 14px;border-bottom:1px solid var(--line);font-size:12px;color:#536078;flex-shrink:0}
+.qr-history-list{overflow:auto;padding:7px;flex:1;min-height:0}
+.qr-history-list .empty-state{padding:40px 10px}
+.qr-history-list .empty-state h2{font-size:14px}
+.qr-row{border:1px solid transparent;border-radius:7px;padding:10px;display:flex;gap:10px;align-items:flex-start;margin-bottom:3px;cursor:pointer}
+.qr-row:hover{background:#f7f9fd}
+.qr-row.active{background:#eef2ff;border-color:#e1e8ff}
+.qr-thumb{width:62px;height:62px;object-fit:contain;border-radius:7px;background:#f5f7fb;border:1px solid #edf1f7;flex-shrink:0}
+.qr-row-content{flex:1;min-width:0}
+.qr-row-preview{background:none;border:0;padding:0;text-align:left;width:100%;font-size:var(--list-font-size);font-weight:600;color:#4a5870;line-height:1.5;word-break:break-all;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;cursor:pointer}
+.qr-row-meta{display:flex;gap:8px;font-size:10px;color:#99a3b5;margin-top:6px}
+.qr-row-source{max-width:80px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.qr-row .icon-button{font-size:14px;width:21px;height:23px;flex-shrink:0}
+.qr-stage{min-width:0;display:flex;flex-direction:column;background:#fff;border:1px solid var(--line);border-radius:11px;overflow:hidden}
+.qr-toolbar{display:flex;align-items:center;gap:9px;flex-wrap:wrap;padding:9px 14px;border-bottom:1px solid #f0f2f7;background:#fcfdff;flex-shrink:0}
+#qr-image-state{font-size:11px;margin-left:auto}
+.qr-image-wrap{flex:1;min-height:0;display:grid;place-items:center;background:#eef1f7;padding:16px;overflow:auto}
+.qr-image-wrap>.empty-state{background:none}
+.qr-image{max-width:100%;max-height:100%;object-fit:contain;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 4px 16px #26396114}
+.qr-result-row{display:flex;gap:9px;align-items:stretch;padding:13px 14px;border-top:1px solid #f0f2f7;flex-shrink:0}
+.qr-result-row textarea{flex:1;min-width:0;min-height:92px;resize:vertical;border:1px solid #dfe5ef;border-radius:7px;padding:10px 11px;font-size:13px;color:#39485f;background:#fcfdff;white-space:pre-wrap;overflow-wrap:anywhere}
+.qr-result-row textarea:focus-visible{border-color:#98b0ff}
+.qr-result-row .button{flex-shrink:0;align-self:flex-start}
+.qr-status{padding:8px 14px;border-top:1px solid #f0f2f7;font-size:11px;color:#aab3c2;flex-shrink:0}
+@media(max-width:1100px){.qr-layout{grid-template-columns:210px minmax(0,1fr);gap:13px}}
+@media(max-width:820px){.qr-layout{grid-template-columns:1fr;height:auto}.qr-browser{max-height:240px}.qr-image-wrap{min-height:260px}}

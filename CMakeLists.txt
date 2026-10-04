@@ -25,6 +25,8 @@ add_library(DesktopToolCore STATIC
     src/services/TorrentService.h src/services/TorrentService.cpp
     src/services/WallpaperService.h src/services/WallpaperService.cpp
     src/services/GridMapService.h src/services/GridMapService.cpp
+    src/services/QrDecoder.h src/services/QrDecoder.cpp
+    src/services/QrService.h src/services/QrService.cpp
     src/app/GlobalHotkey.h src/app/GlobalHotkey.cpp
     src/app/WallpaperWindow.h src/app/WallpaperWindow.cpp
     src/app/WebWindow.h src/app/WebWindow.cpp
@@ -76,6 +78,11 @@ if(BUILD_TESTING)
     target_link_libraries(GridMapServiceTest PRIVATE DesktopToolCore Qt6::Test)
     add_test(NAME gridmap-service COMMAND GridMapServiceTest)
     set_tests_properties(gridmap-service PROPERTIES TIMEOUT 60 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    add_executable(QrServiceTest tests/QrServiceTest.cpp)
+    target_link_libraries(QrServiceTest PRIVATE DesktopToolCore Qt6::Test)
+    target_compile_definitions(QrServiceTest PRIVATE TEST_QR_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/media")
+    add_test(NAME qr-service COMMAND QrServiceTest)
+    set_tests_properties(qr-service PROPERTIES TIMEOUT 60 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     add_executable(WallpaperVideoTest tests/WallpaperVideoTest.cpp resources/app.qrc)
     target_link_libraries(WallpaperVideoTest PRIVATE DesktopToolCore Qt6::Test)
     target_compile_definitions(WallpaperVideoTest PRIVATE TEST_VIDEO_FILE="${CMAKE_CURRENT_SOURCE_DIR}/tests/media/wallpaper-h264.mp4")
@@ -100,6 +107,7 @@ if(BUILD_TESTING)
     set_tests_properties(torrent-service PROPERTIES TIMEOUT 120)
     add_executable(WebSmokeTest tests/WebSmokeTest.cpp resources/app.qrc tests/test-resources.qrc)
     target_link_libraries(WebSmokeTest PRIVATE DesktopToolCore Qt6::Test LibtorrentRasterbar::torrent-rasterbar)
+    target_compile_definitions(WebSmokeTest PRIVATE TEST_QR_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/media")
     add_test(NAME web-integration COMMAND WebSmokeTest)
     set_tests_properties(web-integration PROPERTIES TIMEOUT 90 ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QTWEBENGINE_CHROMIUM_FLAGS=--disable-gpu")
 endif()
