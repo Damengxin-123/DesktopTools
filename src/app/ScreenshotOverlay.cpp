@@ -4,6 +4,7 @@
 #include <QComboBox>
 #include <QEvent>
 #include <QKeyEvent>
+#include <QLineEdit>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPushButton>
@@ -15,8 +16,13 @@ namespace {
 // 可选标注颜色（红、蓝、黄、绿、黑、白）。
 const QColor kColors[]{{230, 47, 47}, {47, 111, 224}, {247, 213, 29},
     {55, 163, 86}, {17, 24, 39}, {255, 255, 255}};
-// 笔画宽度选项（遮罩逻辑像素）。
+// 笔画宽度选项（遮罩逻辑像素）与对应的文字字号。
 const double kWidths[]{2, 4, 7};
+const int kFontSizes[]{16, 22, 30};
+// 缩放手柄的边长与命中外扩量（遮罩逻辑像素）。
+constexpr qreal kHandleSize = 8;
+constexpr qreal kHandleHitExtra = 3;
+constexpr qreal kMinimumSelection = 8;
 }
 
 ScreenshotOverlay::ScreenshotOverlay(const QImage& screenImage, QWidget* parent)
@@ -41,7 +47,7 @@ void ScreenshotOverlay::createToolbar()
     m_toolbar->setStyleSheet(QStringLiteral(
         "#screenshotToolbar{background:#1f2937;border:1px solid #374151;border-radius:8px;}"
         "#screenshotToolbar QToolButton{background:transparent;color:#e5e7eb;border:1px solid transparent;"
-        "border-radius:5px;min-width:30px;min-height:28px;font-size:15px;}"
+        "border-radius:5px;min-width:30px;min-height:28px;font-size:14px;font-weight:600;}"
         "#screenshotToolbar QToolButton:hover{background:#374151;}"
         "#screenshotToolbar QToolButton:checked{background:#315ee7;color:#fff;}"
         "#screenshotToolbar QComboBox{background:#111827;color:#e5e7eb;border:1px solid #374151;"
@@ -53,13 +59,14 @@ void ScreenshotOverlay::createToolbar()
     layout->setContentsMargins(8, 6, 8, 6);
     layout->setSpacing(4);
 
-    // 五个标注工具，单选。
+    // 七个工具按钮，单选；“移动”为默认工具。
     auto* tools = new QButtonGroup(m_toolbar);
     const struct {
         const char* label;
         const char* tip;
         Tool tool;
-    } toolSpecs[]{{"✎", "画笔", Pen}, {"╱", "直线", Line}, {"▭", "矩形", RectTool},
+    } toolSpecs[]{{"✥", "移动/缩放截图框", MoveTool}, {"T", "添加文字", TextTool},
+        {"✎", "画笔", Pen}, {"╱", "直线", Line}, {"▭", "矩形", RectTool},
         {"◯", "椭圆", Ellipse}, {"➚", "箭头", Arrow}};
     for (const auto& spec : toolSpecs) {
         auto* button = new QToolButton(m_toolbar);
@@ -68,8 +75,9 @@ void ScreenshotOverlay::createToolbar()
         button->setCheckable(true);
         button->setFocusPolicy(Qt::NoFocus);
         button->setChecked(spec.tool == m_tool);
-        connect(button, &QToolButton::clicked, this, [this, tool = spec.tool]() { m_tool = tool; });
+        connect(button, &QToolButton::clicked, this, [this, tool = spec.tool]() { setTool(tool); });
         tools->addButton(button);
+        m_toolButtons.append(button);
         layout->addWidget(button);
     }
 
@@ -91,13 +99,14 @@ void ScreenshotOverlay::createToolbar()
 
     auto* widthBox = new QComboBox(m_toolbar);
     widthBox->setFocusPolicy(Qt::NoFocus);
-    widthBox->addItem(QStringLiteral("细"), kWidths[0]);
-    widthBox->addItem(QStringLiteral("中"), kWidths[1]);
-    widthBox->addItem(QStringLiteral("粗"), kWidths[2]);
+    widthBox->addItem(QStringLiteral("细"), int(kWidths[0]));
+    widthBox->addItem(QStringLiteral("中"), int(kWidths[1]));
+    widthBox->addItem(QStringLiteral("粗"), int(kWidths[2]));
     widthBox->setCurrentIndex(1);
-    widthBox->setToolTip(QStringLiteral("笔画粗细"));
+    widthBox->setToolTip(QStringLiteral("笔画粗细 / 文字字号"));
     connect(widthBox, &QComboBox::activated, this, [this, widthBox](int index) {
         m_width = widthBox->itemData(index).toDouble();
+        m_fontSize = kFontSizes[index];
     });
     layout->addWidget(widthBox);
 
@@ -120,11 +129,99 @@ void ScreenshotOverlay::createToolbar()
     auto* confirm = new QPushButton(QStringLiteral("✓ 完成"), m_toolbar);
     confirm->setFocusPolicy(Qt::NoFocus);
     confirm->setStyleSheet(QStringLiteral(
-        "#screenshotToolbar QPushButton:checked{background:#315ee7;}"
         "QPushButton{background:#315ee7;color:#fff;border-color:#315ee7;font-weight:600;}"
         "QPushButton:hover{background:#244fd3;}"));
     connect(confirm, &QPushButton::clicked, this, [this]() { finishCapture(); });
     layout->addWidget(confirm);
+}
+
+void ScreenshotOverlay::setTool(Tool tool)
+{
+    if (m_tool == tool)
+        return;
+    commitTextEditor();
+    m_tool = tool;
+    for (int index = 0; index < m_toolButtons.size(); ++index)
+        m_toolButtons.at(index)->setChecked(index == int(tool));
+    updateCursor(mapFromGlobal(QCursor::pos()));
+    update();
+}
+
+void ScreenshotOverlay::startTextEditing(const QPointF& position)
+{
+    commitTextEditor();
+    m_textAnchor = QPointF(
+        qBound(m_selection.left(), position.x(), qMax(m_selection.left(), m_selection.right() - 60)),
+        qBound(m_selection.top(), position.y(), qMax(m_selection.top(), m_selection.bottom() - m_fontSize - 10)));
+    m_textEditor = new QLineEdit(this);
+    QFont editorFont = font();
+    editorFont.setPixelSize(m_fontSize);
+    m_textEditor->setFont(editorFont);
+    m_textEditor->setStyleSheet(QStringLiteral(
+        "QLineEdit{background:rgba(255,255,255,235);color:%1;border:1px dashed #315ee7;padding:0 3px;}")
+        .arg(m_color.name()));
+    const qreal maxWidth = m_selection.right() - m_textAnchor.x() - 4;
+    m_textEditor->setFixedSize(int(qMin<qreal>(280, qMax<qreal>(80, maxWidth))), m_fontSize + 10);
+    m_textEditor->move(int(m_textAnchor.x()), int(m_textAnchor.y()));
+    m_textEditor->installEventFilter(this);
+    m_textEditor->show();
+    m_textEditor->raise();
+    m_textEditor->setFocus();
+}
+
+void ScreenshotOverlay::commitTextEditor()
+{
+    if (!m_textEditor)
+        return;
+    const QString text = m_textEditor->text().trimmed();
+    const QPointF anchor = m_textAnchor;
+    const QColor color = m_color;
+    const int fontSize = m_fontSize;
+    discardTextEditor();
+    if (!text.isEmpty()) {
+        Stroke stroke;
+        stroke.tool = TextTool;
+        stroke.color = color;
+        stroke.fontSize = fontSize;
+        stroke.points.append(anchor);
+        stroke.text = text;
+        m_strokes.append(stroke);
+    }
+    update();
+}
+
+void ScreenshotOverlay::discardTextEditor()
+{
+    if (!m_textEditor)
+        return;
+    m_textEditor->removeEventFilter(this);
+    m_textEditor->deleteLater();
+    m_textEditor = nullptr;
+    update();
+}
+
+bool ScreenshotOverlay::eventFilter(QObject* watched, QEvent* event)
+{
+    if (watched == m_textEditor && event->type() == QEvent::KeyPress) {
+        const auto* key = static_cast<QKeyEvent*>(event);
+        if (key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter) {
+            commitTextEditor();
+            return true;
+        }
+        if (key->key() == Qt::Key_Escape) {
+            discardTextEditor();
+            return true;
+        }
+    }
+    return QWidget::eventFilter(watched, event);
+}
+
+void ScreenshotOverlay::startNewSelection(const QPointF& position)
+{
+    m_pressSelection = m_selection;
+    m_drag = DragRubberBand;
+    m_pressPos = position;
+    m_selection = QRectF();
 }
 
 void ScreenshotOverlay::updateToolbarGeometry()
@@ -146,6 +243,35 @@ void ScreenshotOverlay::updateToolbarGeometry()
     m_toolbar->raise();
 }
 
+void ScreenshotOverlay::updateCursor(const QPointF& position)
+{
+    if (m_state == Selecting || m_drag == DragRubberBand) {
+        setCursor(Qt::CrossCursor);
+        return;
+    }
+    if (m_tool == TextTool) {
+        setCursor(m_selection.contains(position) ? Qt::IBeamCursor : Qt::CrossCursor);
+        return;
+    }
+    if (m_tool != MoveTool) {
+        setCursor(Qt::CrossCursor);
+        return;
+    }
+    const int handle = handleAt(position);
+    if (handle == TopLeft || handle == BottomRight)
+        setCursor(Qt::SizeFDiagCursor);
+    else if (handle == TopRight || handle == BottomLeft)
+        setCursor(Qt::SizeBDiagCursor);
+    else if (handle == Top || handle == Bottom)
+        setCursor(Qt::SizeVerCursor);
+    else if (handle == Left || handle == Right)
+        setCursor(Qt::SizeHorCursor);
+    else if (m_selection.contains(position))
+        setCursor(Qt::SizeAllCursor);
+    else
+        setCursor(Qt::CrossCursor);
+}
+
 QPointF ScreenshotOverlay::toImagePoint(const QPointF& position) const
 {
     const double scaleX = m_imageLogical.width() / qMax(1.0, double(width()));
@@ -160,6 +286,36 @@ QRectF ScreenshotOverlay::imageSelection() const
     const double scaleY = double(m_image.height()) / qMax(1.0, m_imageLogical.height());
     return QRectF(m_selection.left() * scaleX, m_selection.top() * scaleY,
         m_selection.width() * scaleX, m_selection.height() * scaleY);
+}
+
+QVector<QRectF> ScreenshotOverlay::handleRects() const
+{
+    const QPointF points[8] = {
+        {m_selection.left(), m_selection.top()},
+        {m_selection.center().x(), m_selection.top()},
+        {m_selection.right(), m_selection.top()},
+        {m_selection.right(), m_selection.center().y()},
+        {m_selection.right(), m_selection.bottom()},
+        {m_selection.center().x(), m_selection.bottom()},
+        {m_selection.left(), m_selection.bottom()},
+        {m_selection.left(), m_selection.center().y()}
+    };
+    QVector<QRectF> rects;
+    rects.reserve(8);
+    for (const QPointF& point : points)
+        rects.append(QRectF(point.x() - kHandleSize / 2, point.y() - kHandleSize / 2, kHandleSize, kHandleSize));
+    return rects;
+}
+
+int ScreenshotOverlay::handleAt(const QPointF& position) const
+{
+    const QVector<QRectF> rects = handleRects();
+    for (int index = 0; index < rects.size(); ++index) {
+        if (rects.at(index).adjusted(-kHandleHitExtra, -kHandleHitExtra, kHandleHitExtra, kHandleHitExtra)
+                .contains(position))
+            return index;
+    }
+    return NoHandle;
 }
 
 void ScreenshotOverlay::paintEvent(QPaintEvent* event)
@@ -201,7 +357,7 @@ void ScreenshotOverlay::paintEvent(QPaintEvent* event)
         painter.drawText(box, Qt::AlignCenter, label);
     } else {
         // 尚未选择区域时在顶部显示操作提示。
-        const QString hint = QStringLiteral("拖拽选择截图区域 · 右键或 Esc 取消");
+        const QString hint = QStringLiteral("拖拽选择截图区域 · 框外拖动重新选区 · 右键或 Esc 取消");
         painter.setFont(font());
         const QFontMetrics metrics(font());
         const QSize textSize = metrics.size(Qt::TextSingleLine, hint);
@@ -224,6 +380,13 @@ void ScreenshotOverlay::drawSelectionBorder(QPainter* painter) const
     painter->setPen(pen);
     painter->setBrush(Qt::NoBrush);
     painter->drawRect(m_selection);
+    // 移动工具下显示 8 个缩放手柄。
+    if (m_state == Annotating && m_tool == MoveTool && m_drag != DragRubberBand) {
+        painter->setPen(QPen(QColor(49, 94, 231)));
+        painter->setBrush(Qt::white);
+        for (const QRectF& rect : handleRects())
+            painter->drawRect(rect);
+    }
 }
 
 void ScreenshotOverlay::paintStrokes(QPainter* painter) const
@@ -236,6 +399,16 @@ void ScreenshotOverlay::paintStrokes(QPainter* painter) const
         painter->setPen(pen);
         painter->setBrush(Qt::NoBrush);
         switch (stroke.tool) {
+        case MoveTool:
+        case TextTool: {
+            QFont textFont = painter->font();
+            textFont.setPixelSize(qMax(8, stroke.fontSize));
+            painter->setFont(textFont);
+            painter->setPen(QPen(stroke.color));
+            painter->drawText(QRectF(stroke.points.first(), QSizeF(16384, stroke.fontSize * 3)),
+                Qt::AlignLeft | Qt::AlignTop | Qt::TextSingleLine, stroke.text);
+            break;
+        }
         case Pen:
             if (stroke.points.size() == 1) {
                 // 单击画笔留下圆点。
@@ -275,69 +448,138 @@ void ScreenshotOverlay::paintStrokes(QPainter* painter) const
 void ScreenshotOverlay::mousePressEvent(QMouseEvent* event)
 {
     if (event->button() == Qt::RightButton) {
+        discardTextEditor();
         cancelCapture();
         return;
     }
     if (event->button() != Qt::LeftButton)
         return;
+    const QPointF position = event->position();
     if (m_state == Selecting) {
-        m_dragging = true;
-        m_dragStart = event->position();
+        m_drag = DragRubberBand;
+        m_pressPos = position;
         m_selection = QRectF();
         update();
         return;
     }
-    // 标注阶段：把起点夹紧到选区内。
-    const QPointF clamped(qBound(m_selection.left(), double(event->position().x()), m_selection.right()),
-        qBound(m_selection.top(), double(event->position().y()), m_selection.bottom()));
-    m_live = Stroke{m_tool, m_color, m_width, {clamped, clamped}};
-    m_liveActive = true;
+    // 点击其他位置前先提交未完成的文字。
+    commitTextEditor();
+    if (m_tool == MoveTool) {
+        m_handle = handleAt(position);
+        if (m_handle != NoHandle) {
+            m_drag = DragResize;
+            m_pressSelection = m_selection;
+            m_pressPos = position;
+        } else if (m_selection.contains(position)) {
+            m_drag = DragMove;
+            m_pressSelection = m_selection;
+            m_pressPos = position;
+            m_moveOffset = position - m_selection.topLeft();
+        } else {
+            startNewSelection(position);
+        }
+    } else if (m_tool == TextTool) {
+        if (m_selection.contains(position))
+            startTextEditing(position);
+        else
+            startNewSelection(position);
+    } else if (m_selection.contains(position)) {
+        m_drag = DragStroke;
+        const QPointF clamped(qBound(m_selection.left(), position.x(), m_selection.right()),
+            qBound(m_selection.top(), position.y(), m_selection.bottom()));
+        m_live = Stroke{m_tool, m_color, m_width, {clamped, clamped}, QString(), 0};
+        m_liveActive = true;
+    } else {
+        startNewSelection(position);
+    }
     update();
 }
 
 void ScreenshotOverlay::mouseMoveEvent(QMouseEvent* event)
 {
-    if (m_dragging) {
-        m_selection = QRectF(m_dragStart, event->position()).normalized();
+    const QPointF position = event->position();
+    if (m_drag == DragRubberBand) {
+        m_selection = QRectF(m_pressPos, position).normalized();
         update();
         return;
     }
-    if (!m_liveActive)
+    if (m_drag == DragMove) {
+        QRectF moved = m_pressSelection.translated(position - m_pressPos);
+        moved.moveLeft(qBound(0.0, moved.left(), qMax(0.0, width() - moved.width())));
+        moved.moveTop(qBound(0.0, moved.top(), qMax(0.0, height() - moved.height())));
+        m_selection = moved;
+        update();
         return;
-    const QPointF clamped(qBound(m_selection.left(), double(event->position().x()), m_selection.right()),
-        qBound(m_selection.top(), double(event->position().y()), m_selection.bottom()));
-    if (m_live.tool == Pen)
-        m_live.points.append(clamped);
-    else
-        m_live.points[1] = clamped;
-    update();
+    }
+    if (m_drag == DragResize) {
+        const QPointF clamped(qBound(0.0, position.x(), double(width())),
+            qBound(0.0, position.y(), double(height())));
+        qreal left = m_pressSelection.left();
+        qreal top = m_pressSelection.top();
+        qreal right = m_pressSelection.right();
+        qreal bottom = m_pressSelection.bottom();
+        if (m_handle == TopLeft || m_handle == Left || m_handle == BottomLeft)
+            left = clamped.x();
+        if (m_handle == TopLeft || m_handle == Top || m_handle == TopRight)
+            top = clamped.y();
+        if (m_handle == TopRight || m_handle == Right || m_handle == BottomRight)
+            right = clamped.x();
+        if (m_handle == BottomRight || m_handle == Bottom || m_handle == BottomLeft)
+            bottom = clamped.y();
+        m_selection = QRectF(QPointF(left, top), QPointF(right, bottom)).normalized();
+        if (m_selection.width() < kMinimumSelection)
+            m_selection.setWidth(kMinimumSelection);
+        if (m_selection.height() < kMinimumSelection)
+            m_selection.setHeight(kMinimumSelection);
+        update();
+        return;
+    }
+    if (m_drag == DragStroke) {
+        const QPointF clamped(qBound(m_selection.left(), position.x(), m_selection.right()),
+            qBound(m_selection.top(), position.y(), m_selection.bottom()));
+        if (m_live.tool == Pen)
+            m_live.points.append(clamped);
+        else
+            m_live.points[1] = clamped;
+        update();
+        return;
+    }
+    updateCursor(position);
 }
 
 void ScreenshotOverlay::mouseReleaseEvent(QMouseEvent* event)
 {
     if (event->button() != Qt::LeftButton)
         return;
-    if (m_dragging) {
-        m_dragging = false;
-        m_selection = QRectF(m_dragStart, event->position()).normalized();
-        // 过小的拖拽视为误触，继续等待选区。
-        if (m_selection.width() < 8 || m_selection.height() < 8) {
-            m_selection = QRectF();
-            update();
-            return;
+    const QPointF position = event->position();
+    if (m_drag == DragRubberBand) {
+        m_selection = QRectF(m_pressPos, position).normalized();
+        if (m_selection.width() < kMinimumSelection || m_selection.height() < kMinimumSelection) {
+            // 过小的拖拽视为误触：恢复原选区；原本没有选区时回到初始状态。
+            m_selection = m_pressSelection;
+            m_state = m_selection.isNull() ? Selecting : Annotating;
+            if (m_state == Annotating)
+                updateToolbarGeometry();
+        } else {
+            m_state = Annotating;
+            setTool(MoveTool);
+            updateToolbarGeometry();
         }
-        m_state = Annotating;
-        updateToolbarGeometry();
+        updateCursor(position);
         update();
-        return;
+    } else if (m_drag == DragMove || m_drag == DragResize) {
+        m_drag = DragNone;
+        m_handle = NoHandle;
+        updateCursor(position);
+        update();
+    } else if (m_drag == DragStroke) {
+        m_drag = DragNone;
+        m_liveActive = false;
+        if (m_live.tool != Pen && m_live.points.first() == m_live.points.last())
+            return; // 形状起止重合时丢弃，避免残留看不见的笔画。
+        m_strokes.append(m_live);
+        update();
     }
-    if (!m_liveActive)
-        return;
-    m_liveActive = false;
-    if (m_live.tool != Pen && m_live.points.first() == m_live.points.last())
-        return; // 形状起止重合时丢弃，避免残留看不见的笔画。
-    m_strokes.append(m_live);
-    update();
 }
 
 void ScreenshotOverlay::keyPressEvent(QKeyEvent* event)
@@ -358,6 +600,7 @@ void ScreenshotOverlay::finishCapture()
 {
     if (m_state != Annotating || m_finished)
         return;
+    commitTextEditor();
     const QRect crop = imageSelection().toAlignedRect().intersected(m_image.rect());
     if (crop.isEmpty()) {
         cancelCapture();
@@ -390,6 +633,7 @@ void ScreenshotOverlay::cancelCapture()
     if (m_finished)
         return;
     m_finished = true;
+    discardTextEditor();
     emit finished(QImage(), true);
     close();
 }
@@ -400,6 +644,7 @@ void ScreenshotOverlay::closeEvent(QCloseEvent* event)
     event->accept();
     if (!m_finished) {
         m_finished = true;
+        discardTextEditor();
         emit finished(QImage(), true);
     }
 }

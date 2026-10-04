@@ -107,10 +107,13 @@ AppBridge::AppBridge(const QString& dataRoot, QWidget* window, bool nativeIntegr
     const auto result = m_settings->snapshot();
     if (result.value("ok").toBool()) {
         const auto settings = result.value("data").toMap();
+        m_screenshotEnabled = settings.value("screenshotEnabled").toBool();
         m_hotkey->setShortcut(settings.value("hotkeyModifier").toInt(),
                              settings.value("hotkeyKey").toInt(), &m_hotkeyWarning);
-        m_screenshotHotkey->setShortcut(settings.value("screenshotHotkeyModifier").toInt(),
-            settings.value("screenshotHotkeyKey").toInt(), &m_screenshotHotkeyWarning);
+        // 功能关闭时不注册截图热键，避免与用户当前的使用习惯冲突。
+        if (m_screenshotEnabled)
+            m_screenshotHotkey->setShortcut(settings.value("screenshotHotkeyModifier").toInt(),
+                settings.value("screenshotHotkeyKey").toInt(), &m_screenshotHotkeyWarning);
     } else {
         m_hotkeyWarning = result.value("error").toString();
     }
@@ -359,19 +362,51 @@ QVariantMap AppBridge::copyScreenshot(const QString& id)
     return ServiceResult::success();
 }
 
-// 校验并保存截图热键；先预留注册，保存成功后才启用，失败时回滚。
+// 校验并保存截图热键；启用状态下先预留注册，保存成功后才启用，失败时回滚。
 QVariantMap AppBridge::saveScreenshotHotkey(int modifier, int key)
 {
+    const bool registered = m_screenshotEnabled;
     QString error;
-    if (!m_screenshotHotkey->prepareShortcut(modifier, key, &error))
+    if (registered && !m_screenshotHotkey->prepareShortcut(modifier, key, &error))
         return ServiceResult::failure(error);
     const auto saved = m_settings->save({{"screenshotHotkeyModifier", modifier}, {"screenshotHotkeyKey", key}});
     if (!saved.value("ok").toBool()) {
-        m_screenshotHotkey->cancelShortcut();
+        if (registered)
+            m_screenshotHotkey->cancelShortcut();
         return saved;
     }
-    m_screenshotHotkey->commitShortcut();
+    if (registered)
+        m_screenshotHotkey->commitShortcut();
     m_screenshotHotkeyWarning.clear();
+    return saved;
+}
+
+// 开关截图功能：关闭时解除热键，开启时按已保存的组合重新注册，保存失败回滚。
+QVariantMap AppBridge::setScreenshotEnabled(bool enabled)
+{
+    if (enabled == m_screenshotEnabled)
+        return m_settings->snapshot();
+    QString error;
+    if (enabled) {
+        const auto settings = m_settings->snapshot().value("data").toMap();
+        if (!m_screenshotHotkey->setShortcut(settings.value("screenshotHotkeyModifier").toInt(),
+                settings.value("screenshotHotkeyKey").toInt(), &error))
+            return ServiceResult::failure(error);
+    } else {
+        m_screenshotHotkey->releaseShortcut();
+    }
+    const auto saved = m_settings->save({{"screenshotEnabled", enabled}});
+    if (!saved.value("ok").toBool()) {
+        if (enabled)
+            m_screenshotHotkey->releaseShortcut();
+        else {
+            const auto settings = m_settings->snapshot().value("data").toMap();
+            m_screenshotHotkey->setShortcut(settings.value("screenshotHotkeyModifier").toInt(),
+                settings.value("screenshotHotkeyKey").toInt(), nullptr);
+        }
+        return saved;
+    }
+    m_screenshotEnabled = enabled;
     return saved;
 }
 
@@ -441,6 +476,8 @@ QVariantMap AppBridge::startScreenshot()
 {
     if (!m_nativeIntegration)
         return ServiceResult::failure(QStringLiteral("当前环境不支持截图功能。"));
+    if (!m_screenshotEnabled)
+        return ServiceResult::failure(QStringLiteral("截图功能已关闭，请在截图页重新开启。"));
     if (m_screenshotBusy || !m_overlays.isEmpty())
         return ServiceResult::failure(QStringLiteral("截图正在进行中，请先完成或取消。"));
     beginScreenshot(m_window && m_window->isVisible());
@@ -524,7 +561,8 @@ QVariantMap AppBridge::resetSettings()
 {
     return saveSettings({{"fontSize", 16}, {"hotkeyModifier", 0}, {"hotkeyKey", 0x77},
         {"downloadDirectory", QString()}, {"autoStart", false},
-        {"screenshotHotkeyModifier", 3}, {"screenshotHotkeyKey", 0x41}});
+        {"screenshotHotkeyModifier", 3}, {"screenshotHotkeyKey", 0x41},
+        {"screenshotEnabled", true}});
 }
 
 QVariantMap AppBridge::openDataDirectory()

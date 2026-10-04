@@ -115,6 +115,8 @@ public:
     Q_INVOKABLE QVariantMap removeQrHistory(const QStringList& ids);
     // 清空识别历史。
     Q_INVOKABLE QVariantMap clearQrHistory();
+    // 开启或关闭截图功能；关闭时解除全局热键，开启时按已保存的组合重新注册。
+    Q_INVOKABLE QVariantMap setScreenshotEnabled(bool enabled);
     // 触发一次交互式截图（全屏遮罩选区并标注），完成后写入剪贴板与历史。
     Q_INVOKABLE QVariantMap startScreenshot();
     // 校验并保存截图热键，注册成功后写入设置，失败时回滚注册。
@@ -253,6 +255,8 @@ private:
     QString m_screenshotHotkeyWarning;
     // 截图流程进行中，避免重复触发。
     bool m_screenshotBusy = false;
+    // 截图功能开关；关闭时热键解除且页面按钮不可用。
+    bool m_screenshotEnabled = true;
     // 每块屏幕一个截图遮罩；收到 finished 后逐个销毁。
     QList<QPointer<ScreenshotOverlay>> m_overlays;
     // 是否启用系统级交互（热键注册、截屏遮罩）。

@@ -7,6 +7,7 @@
     timer: null, // 后端通知合并定时器。
     hotkeyDraft: null, // 正在输入的截图热键 {modifier,key}。
     hotkeySaving: false,
+    screenshotEnabled: true, // 功能开关（后端设置）。
     currentId: "", // 预览弹窗显示的记录。
     initialized: false,
     options: null // 主页面提供的提示函数。
@@ -63,7 +64,12 @@
     byId("screenshot-count").textContent = String(state.items.length);
     byId("screenshot-summary").textContent = state.items.length + " 张";
     byId("screenshot-clear").disabled = !state.items.length;
-    byId("screenshot-hotkey-save").disabled = !state.hotkeyDraft || state.hotkeySaving;
+    byId("screenshot-start").disabled = !state.screenshotEnabled;
+    byId("screenshot-enabled-state").textContent =
+      state.screenshotEnabled ? "" : "已关闭，截图热键与开始按钮不可用";
+    byId("screenshot-hotkey-input").disabled = !state.screenshotEnabled;
+    byId("screenshot-hotkey-save").disabled =
+      !state.screenshotEnabled || !state.hotkeyDraft || state.hotkeySaving;
   }
 
   function renderList() {
@@ -147,10 +153,12 @@
     state.timer = setTimeout(function runScheduledRefresh() { refresh().catch(report); }, 100);
   }
 
-  // 读取热键设置与启动警告，刷新输入框显示。
+  // 读取热键与功能开关设置，刷新输入框与开关显示。
   async function refreshHotkey() {
     const settings = await window.desktopBridge.call("getSettings");
+    state.screenshotEnabled = settings.screenshotEnabled === true;
     state.hotkeyDraft = null;
+    byId("screenshot-enabled").checked = state.screenshotEnabled;
     byId("screenshot-hotkey-input").value =
       hotkeyName(Number(settings.screenshotHotkeyModifier), Number(settings.screenshotHotkeyKey));
     const info = await window.desktopBridge.call("getAppInfo");
@@ -193,6 +201,23 @@
       byId("screenshot-start").addEventListener("click", action(async function startClicked() {
         await window.desktopBridge.call("startScreenshot");
       }));
+      byId("screenshot-enabled").addEventListener("change", async function enabledChanged(event) {
+        const source = event.currentTarget;
+        const enabled = source.checked;
+        source.disabled = true;
+        try {
+          await window.desktopBridge.call("setScreenshotEnabled", enabled);
+          state.screenshotEnabled = enabled;
+          state.options.toast(enabled ? "已启用截图功能" : "已关闭截图功能");
+          await refreshHotkey();
+        } catch (error) {
+          source.checked = state.screenshotEnabled;
+          report(error);
+        } finally {
+          source.disabled = false;
+          updateState();
+        }
+      });
       byId("screenshot-hotkey-input").addEventListener("keydown", captureHotkey);
       byId("screenshot-hotkey-save").addEventListener("click", action(async function saveHotkeyClicked() {
         if (!state.hotkeyDraft || state.hotkeySaving) return;

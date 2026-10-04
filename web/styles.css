@@ -246,6 +246,8 @@
 /* 截图页：热键卡片 + 缩略图列表。 */
 .screenshot-hotkey-card{margin:0 0 22px;padding:20px 22px 14px;border:1px solid var(--line);border-radius:12px;background:var(--surface)}
 .screenshot-hotkey-card legend{padding:0 8px;font-weight:600;color:#566780}
+.screenshot-enable-row{display:flex;align-items:center;gap:12px;margin-bottom:15px}
+.screenshot-enable-row .muted{font-size:11px}
 .screenshot-hotkey-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 .screenshot-hotkey-row .muted{font-size:11px}
 .screenshot-list-heading{display:flex;align-items:center;gap:14px;margin-bottom:14px}

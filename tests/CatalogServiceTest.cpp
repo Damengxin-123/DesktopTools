@@ -247,6 +247,11 @@ bool settingsCompatibility()
     REQUIRE(changes == 2);
     REQUIRE(resultData(service.snapshot()).value(QStringLiteral("screenshotHotkeyModifier")).toInt() == 5);
     REQUIRE(QJsonDocument::fromJson(readFile(path)).object().value(QStringLiteral("screenshot_hotkey_key")).toInt() == 0x53);
+    REQUIRE(resultData(service.snapshot()).value(QStringLiteral("screenshotEnabled")).toBool());
+    REQUIRE(!ok(service.save({{QStringLiteral("screenshotEnabled"), 1}})));
+    REQUIRE(ok(service.save({{QStringLiteral("screenshotEnabled"), false}})));
+    REQUIRE(!resultData(service.snapshot()).value(QStringLiteral("screenshotEnabled")).toBool());
+    REQUIRE(ok(service.save({{QStringLiteral("screenshotEnabled"), true}})));
     SettingsService reopened(directory.path());
     REQUIRE(reopened.snapshot() == service.snapshot());
     REQUIRE(!ok(SettingsService::validate({{QStringLiteral("fontSize"), 16}})));

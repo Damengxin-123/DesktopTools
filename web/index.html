@@ -207,14 +207,18 @@
           <header class="page-header"><div><div class="eyebrow">SCREENSHOT</div><h1 id="screenshot-heading">截图</h1><p>按下热键或点击按钮开始截图，框选区域、添加标注，完成后自动复制并留档。</p></div><button id="screenshot-start" class="button primary"><span aria-hidden="true">✂</span>开始截图</button></header>
           <div id="screenshot-error" class="notice warning" role="alert" hidden></div>
           <fieldset class="screenshot-hotkey-card">
-            <legend>截图热键</legend>
+            <legend>截图功能</legend>
+            <div class="screenshot-enable-row">
+              <label class="wallpaper-switch" for="screenshot-enabled"><input id="screenshot-enabled" type="checkbox" role="switch" checked><span class="switch-track" aria-hidden="true"></span><span>启用截图功能</span></label>
+              <span id="screenshot-enabled-state" class="muted" role="status"></span>
+            </div>
             <div class="screenshot-hotkey-row">
               <label class="sr-only" for="screenshot-hotkey-input">截图热键</label>
               <input id="screenshot-hotkey-input" class="hotkey-input" type="text" readonly value="Ctrl+Alt+A" aria-describedby="screenshot-hotkey-help">
               <button id="screenshot-hotkey-save" class="button secondary" disabled>保存热键</button>
               <span id="screenshot-hotkey-state" class="muted" role="status"></span>
             </div>
-            <p class="field-help" id="screenshot-hotkey-help">点击输入框后按下需要的组合键；保存后全局生效，程序隐藏到托盘时同样可用。热键在全屏截图遮罩下触发可能被占用提示拒绝。</p>
+            <p class="field-help" id="screenshot-hotkey-help">点击输入框后按下需要的组合键；保存后全局生效，程序隐藏到托盘时同样可用。关闭开关会解除热键并停用开始按钮，重新开启后恢复。</p>
             <div id="screenshot-hotkey-warning" class="notice warning" hidden></div>
           </fieldset>
           <div class="screenshot-list-heading"><h2>截图记录</h2><span id="screenshot-summary" class="muted">0 张</span><button id="screenshot-clear" class="button danger quiet" disabled>清空记录</button></div>

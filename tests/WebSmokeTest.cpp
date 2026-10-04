@@ -714,6 +714,23 @@ void WebSmokeTest::screenshotsThroughPage()
         QVERIFY(window.grab().save(capturePath));
     }
 
+    // 功能开关：关闭后解除热键并禁用开始按钮，重新开启后恢复默认组合。
+    evaluate(page, QStringLiteral("document.querySelector('#screenshot-enabled').click(); true"));
+    QTRY_COMPARE(bridge->getSettings().value("data").toMap().value("screenshotEnabled").toBool(), false);
+    QTRY_VERIFY(evaluate(page, QStringLiteral("document.querySelector('#screenshot-start').disabled")).toBool());
+    QVERIFY(evaluate(page, QStringLiteral("document.querySelector('#screenshot-hotkey-input').disabled")).toBool());
+    GlobalHotkey* screenshotHotkey = nullptr;
+    for (GlobalHotkey* hotkey : bridge->findChildren<GlobalHotkey*>()) {
+        if (hotkey->idBase() == 0x4D03)
+            screenshotHotkey = hotkey;
+    }
+    QVERIFY(screenshotHotkey);
+    QCOMPARE(screenshotHotkey->key(), 0);
+    evaluate(page, QStringLiteral("document.querySelector('#screenshot-enabled').click(); true"));
+    QTRY_COMPARE(bridge->getSettings().value("data").toMap().value("screenshotEnabled").toBool(), true);
+    QTRY_VERIFY(!evaluate(page, QStringLiteral("document.querySelector('#screenshot-start').disabled")).toBool());
+    QTRY_COMPARE(screenshotHotkey->key(), 0x41);
+
     // 热键保存写回设置并刷新显示。
     evaluate(page, QStringLiteral("window.desktopBridge.call('saveScreenshotHotkey', 6, 83)"
         ".then(() => { window.__hotkeySaved = true; }, (error) => { window.__hotkeySaved = error.message; }); true"));

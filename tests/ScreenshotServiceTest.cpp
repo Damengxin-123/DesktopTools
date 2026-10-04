@@ -5,6 +5,7 @@
 #include <QDir>
 #include <QFile>
 #include <QImage>
+#include <QLineEdit>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPointer>
@@ -64,6 +65,18 @@ void sendMouse(ScreenshotOverlay& overlay, QEvent::Type type, const QPoint& posi
         button, button, Qt::NoModifier);
     QApplication::sendEvent(&overlay, &event);
 }
+
+// 通过工具提示找到并点击工具栏按钮（切换标注工具、撤销等）。
+void activateTool(ScreenshotOverlay& overlay, const QString& tip)
+{
+    for (QToolButton* button : overlay.findChildren<QToolButton*>()) {
+        if (button->toolTip() == tip) {
+            button->click();
+            return;
+        }
+    }
+    QVERIFY2(false, qPrintable(QStringLiteral("找不到工具按钮：") + tip));
+}
 }
 
 // 覆盖截图历史的增删持久化与保护，以及遮罩的选区、标注、撤销与合成输出。
@@ -93,6 +106,10 @@ private slots:
     void overlaySecondaryScreenGeometry();
     // 高 DPR（4K 150%/200% 缩放）下预览与底图对齐，合成图为设备像素。
     void overlayHighDpiAlignment();
+    // 默认移动工具：框内拖动移动选区、手柄缩放、框外拖动重新选区、右键取消。
+    void overlayMoveResizeAndReselect();
+    // 文字标注：编辑器放置、Esc 丢弃、Enter 提交并渲染进合成图。
+    void overlayTextAnnotation();
 };
 
 void ScreenshotServiceTest::addsAndReads()
@@ -244,7 +261,8 @@ void ScreenshotServiceTest::overlaySelectionAndAnnotation()
     QVERIFY(overlay.isAnnotating());
     QCOMPARE(overlay.selection(), QRectF(20, 20, 200, 150));
 
-    // 画笔画一条红色折线，落点在选区内。
+    // 默认工具为移动；切换到画笔后画一条红色折线，落点在选区内。
+    activateTool(overlay, QStringLiteral("画笔"));
     sendMouse(overlay, QEvent::MouseButtonPress, QPoint(30, 30), Qt::LeftButton);
     sendMouse(overlay, QEvent::MouseMove, QPoint(60, 60), Qt::LeftButton);
     sendMouse(overlay, QEvent::MouseMove, QPoint(100, 100), Qt::LeftButton);
@@ -281,6 +299,7 @@ void ScreenshotServiceTest::overlayUndoAndCancel()
     QVERIFY(overlay.isAnnotating());
 
     // 两条画笔线：第一条穿过 (65,65)，第二条竖线在 (180,*)。
+    activateTool(overlay, QStringLiteral("画笔"));
     sendMouse(overlay, QEvent::MouseButtonPress, QPoint(30, 30), Qt::LeftButton);
     sendMouse(overlay, QEvent::MouseMove, QPoint(100, 100), Qt::LeftButton);
     sendMouse(overlay, QEvent::MouseButtonRelease, QPoint(100, 100), Qt::LeftButton);
@@ -344,6 +363,8 @@ void ScreenshotServiceTest::overlaySecondaryScreenGeometry()
     QVERIFY(overlay.isAnnotating());
     QCOMPARE(overlay.selection(), QRectF(20, 20, 200, 150));
 
+    // 默认工具为移动，切换到画笔后画一条红色折线。
+    activateTool(overlay, QStringLiteral("画笔"));
     sendMouse(overlay, QEvent::MouseButtonPress, QPoint(30, 30), Qt::LeftButton);
     sendMouse(overlay, QEvent::MouseMove, QPoint(100, 100), Qt::LeftButton);
     sendMouse(overlay, QEvent::MouseButtonRelease, QPoint(100, 100), Qt::LeftButton);
@@ -399,6 +420,97 @@ void ScreenshotServiceTest::overlayHighDpiAlignment()
     QVERIFY(colorNear(composed.pixelColor(98, 100), QColor(180, 40, 40), 30));
     QVERIFY(colorNear(composed.pixelColor(302, 100), QColor(40, 120, 180), 30));
     QVERIFY(colorNear(composed.pixelColor(390, 190), QColor(40, 120, 180), 30));
+}
+
+void ScreenshotServiceTest::overlayMoveResizeAndReselect()
+{
+    QImage desktop(400, 300, QImage::Format_RGB32);
+    desktop.fill(QColor(250, 250, 250));
+    ScreenshotOverlay overlay(desktop);
+    overlay.setGeometry(0, 0, 400, 300);
+    overlay.show();
+
+    sendMouse(overlay, QEvent::MouseButtonPress, QPoint(100, 100), Qt::LeftButton);
+    sendMouse(overlay, QEvent::MouseButtonRelease, QPoint(300, 200), Qt::LeftButton);
+    QVERIFY(overlay.isAnnotating());
+
+    // 默认工具为移动：框内按下拖动整体平移选区，大小不变。
+    sendMouse(overlay, QEvent::MouseButtonPress, QPoint(200, 150), Qt::LeftButton);
+    sendMouse(overlay, QEvent::MouseMove, QPoint(220, 170), Qt::LeftButton);
+    sendMouse(overlay, QEvent::MouseButtonRelease, QPoint(220, 170), Qt::LeftButton);
+    QCOMPARE(overlay.selection(), QRectF(120, 120, 200, 100));
+
+    // 拖动右下角手柄缩放选区。
+    sendMouse(overlay, QEvent::MouseButtonPress, QPoint(320, 220), Qt::LeftButton);
+    sendMouse(overlay, QEvent::MouseMove, QPoint(350, 240), Qt::LeftButton);
+    sendMouse(overlay, QEvent::MouseButtonRelease, QPoint(350, 240), Qt::LeftButton);
+    QCOMPARE(overlay.selection(), QRectF(120, 120, 230, 120));
+
+    // 框外拖动表示重新框选，替换旧选区。
+    sendMouse(overlay, QEvent::MouseButtonPress, QPoint(20, 20), Qt::LeftButton);
+    sendMouse(overlay, QEvent::MouseMove, QPoint(90, 90), Qt::LeftButton);
+    sendMouse(overlay, QEvent::MouseButtonRelease, QPoint(90, 90), Qt::LeftButton);
+    QCOMPARE(overlay.selection(), QRectF(20, 20, 70, 70));
+    QVERIFY(overlay.isAnnotating());
+
+    // 框外过小的拖拽视为误触：恢复原选区而不是清空。
+    sendMouse(overlay, QEvent::MouseButtonPress, QPoint(350, 150), Qt::LeftButton);
+    sendMouse(overlay, QEvent::MouseButtonRelease, QPoint(353, 152), Qt::LeftButton);
+    QCOMPARE(overlay.selection(), QRectF(20, 20, 70, 70));
+
+    // 右键取消整次截图。
+    bool cancelled = false;
+    connect(&overlay, &ScreenshotOverlay::finished, [&cancelled](const QImage& image, bool wasCancelled) {
+        cancelled = wasCancelled && image.isNull();
+    });
+    sendMouse(overlay, QEvent::MouseButtonPress, QPoint(50, 50), Qt::RightButton);
+    QVERIFY(cancelled);
+}
+
+void ScreenshotServiceTest::overlayTextAnnotation()
+{
+    QImage desktop(400, 300, QImage::Format_RGB32);
+    desktop.fill(QColor(250, 250, 250));
+    ScreenshotOverlay overlay(desktop);
+    overlay.setGeometry(0, 0, 400, 300);
+    overlay.show();
+
+    sendMouse(overlay, QEvent::MouseButtonPress, QPoint(20, 20), Qt::LeftButton);
+    sendMouse(overlay, QEvent::MouseButtonRelease, QPoint(320, 200), Qt::LeftButton);
+    QVERIFY(overlay.isAnnotating());
+    activateTool(overlay, QStringLiteral("添加文字"));
+
+    // 点击选区内放置行内编辑器。
+    sendMouse(overlay, QEvent::MouseButtonPress, QPoint(40, 40), Qt::LeftButton);
+    QLineEdit* editor = overlay.findChild<QLineEdit*>();
+    QVERIFY(editor);
+    QTest::keyClicks(editor, QStringLiteral("abc"));
+
+    // 编辑中按 Esc 只丢弃文字，不取消整次截图。
+    QTest::keyClick(editor, Qt::Key_Escape);
+    QTest::qWait(20);
+    QVERIFY(!overlay.findChild<QLineEdit*>());
+    QVERIFY(overlay.isAnnotating());
+    QCOMPARE(overlay.annotationCount(), 0);
+
+    // 重新放置并输入，Enter 提交为一条文字标注。
+    sendMouse(overlay, QEvent::MouseButtonPress, QPoint(40, 40), Qt::LeftButton);
+    editor = overlay.findChild<QLineEdit*>();
+    QVERIFY(editor);
+    QTest::keyClicks(editor, QStringLiteral("abc"));
+    QTest::keyClick(editor, Qt::Key_Return);
+    QTest::qWait(20);
+    QVERIFY(!overlay.findChild<QLineEdit*>());
+    QCOMPARE(overlay.annotationCount(), 1);
+
+    // 确认后合成流程完整（字体在 offscreen 环境可能缺失，不做像素断言）。
+    QImage composed;
+    connect(&overlay, &ScreenshotOverlay::finished, [&composed](const QImage& image, bool) {
+        composed = image;
+    });
+    QTest::keyClick(&overlay, Qt::Key_Return);
+    QVERIFY(!composed.isNull());
+    QCOMPARE(composed.size(), QSize(300, 180));
 }
 
 QTEST_MAIN(ScreenshotServiceTest)

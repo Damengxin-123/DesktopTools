@@ -20,6 +20,8 @@ public:
     void commitShortcut();
     // 设置保存失败时只释放预留组合，保持旧组合不变。
     void cancelShortcut();
+    // 主动解除当前热键注册（功能被关闭时使用），清空当前组合。
+    void releaseShortcut();
     // 读取当前成功注册的修饰键。
     int modifier() const { return m_modifier; }
     // 读取当前成功注册的虚拟键。

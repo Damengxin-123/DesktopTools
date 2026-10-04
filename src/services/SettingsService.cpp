@@ -124,6 +124,8 @@ QVariantMap SettingsService::data() const
              ? m_document.value(QStringLiteral("screenshot_hotkey_modifier")).toVariant() : QVariant(3)},
         {QStringLiteral("screenshotHotkeyKey"), m_document.contains(QStringLiteral("screenshot_hotkey_key"))
              ? m_document.value(QStringLiteral("screenshot_hotkey_key")).toVariant() : QVariant(0x41)},
+        {QStringLiteral("screenshotEnabled"), m_document.contains(QStringLiteral("screenshot_enabled"))
+             ? m_document.value(QStringLiteral("screenshot_enabled")).toVariant() : QVariant(true)},
         {QStringLiteral("downloadDirectory"), m_document.contains(QStringLiteral("download_directory"))
              ? m_document.value(QStringLiteral("download_directory")).toVariant() : QVariant(defaultDownloadDirectory())}
     };
@@ -139,6 +141,9 @@ QVariantMap SettingsService::validateValues(const QVariantMap& settings, bool ch
     if (settings.contains(QStringLiteral("autoStart"))
         && !QJsonValue::fromVariant(settings.value(QStringLiteral("autoStart"))).isBool())
         return ServiceResult::failure(QStringLiteral("开机自启必须为勾选或未勾选状态。"));
+    if (settings.contains(QStringLiteral("screenshotEnabled"))
+        && !QJsonValue::fromVariant(settings.value(QStringLiteral("screenshotEnabled"))).isBool())
+        return ServiceResult::failure(QStringLiteral("截图功能开关必须为勾选或未勾选状态。"));
     if (!integerValue(settings.value(QStringLiteral("fontSize")), 8, 32))
         return ServiceResult::failure(QStringLiteral("字体大小必须为 8 至 32 的整数。"));
     if (!integerValue(settings.value(QStringLiteral("hotkeyModifier")), 0, 15))
@@ -160,7 +165,8 @@ QVariantMap SettingsService::validateValues(const QVariantMap& settings, bool ch
             && iterator.key() != QStringLiteral("hotkeyKey") && iterator.key() != QStringLiteral("downloadDirectory")
             && iterator.key() != QStringLiteral("autoStart")
             && iterator.key() != QStringLiteral("screenshotHotkeyModifier")
-            && iterator.key() != QStringLiteral("screenshotHotkeyKey"))
+            && iterator.key() != QStringLiteral("screenshotHotkeyKey")
+            && iterator.key() != QStringLiteral("screenshotEnabled"))
             return ServiceResult::failure(QStringLiteral("未知的设置字段：%1").arg(iterator.key()));
     }
     if (settings.contains(QStringLiteral("downloadDirectory"))
@@ -185,6 +191,7 @@ QVariantMap SettingsService::validateValues(const QVariantMap& settings, bool ch
         {QStringLiteral("hotkeyKey"), key},
         {QStringLiteral("screenshotHotkeyModifier"), settings.value(QStringLiteral("screenshotHotkeyModifier")).toInt()},
         {QStringLiteral("screenshotHotkeyKey"), settings.value(QStringLiteral("screenshotHotkeyKey")).toInt()},
+        {QStringLiteral("screenshotEnabled"), settings.value(QStringLiteral("screenshotEnabled"), true).toBool()},
         {QStringLiteral("downloadDirectory"), directory}
     });
 }
@@ -212,6 +219,7 @@ QVariantMap SettingsService::save(const QVariantMap& settings)
     document.insert(QStringLiteral("hotkey_key"), candidate.value(QStringLiteral("hotkeyKey")).toInt());
     document.insert(QStringLiteral("screenshot_hotkey_modifier"), candidate.value(QStringLiteral("screenshotHotkeyModifier")).toInt());
     document.insert(QStringLiteral("screenshot_hotkey_key"), candidate.value(QStringLiteral("screenshotHotkeyKey")).toInt());
+    document.insert(QStringLiteral("screenshot_enabled"), candidate.value(QStringLiteral("screenshotEnabled")).toBool());
     document.insert(QStringLiteral("download_directory"), candidate.value(QStringLiteral("downloadDirectory")).toString());
     if (!QDir().mkpath(QFileInfo(m_path).absolutePath()))
         return ServiceResult::failure(QStringLiteral("无法创建设置目录。"));

@@ -77,6 +77,18 @@ void GlobalHotkey::cancelShortcut()
     m_pendingId = 0;
 }
 
+void GlobalHotkey::releaseShortcut()
+{
+#ifdef Q_OS_WIN
+    if (m_enabled && m_id)
+        UnregisterHotKey(nullptr, m_id);
+#endif
+    m_id = 0;
+    m_modifier = 0;
+    m_key = 0;
+    cancelShortcut();
+}
+
 bool GlobalHotkey::nativeEventFilter(const QByteArray& eventType, void* message, qintptr* result)
 {
     Q_UNUSED(result)
