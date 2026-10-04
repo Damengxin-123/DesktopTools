@@ -89,6 +89,8 @@ private slots:
     void overlaySelectionAndAnnotation();
     // 遮罩：撤销移除最后一步标注，Esc 取消整次截图。
     void overlayUndoAndCancel();
+    // 遮罩摆在非原点几何（模拟副屏）时映射只依赖局部坐标。
+    void overlaySecondaryScreenGeometry();
 };
 
 void ScreenshotServiceTest::addsAndReads()
@@ -320,6 +322,39 @@ void ScreenshotServiceTest::overlayUndoAndCancel()
     second->deleteLater();
     QTest::qWait(50);
     QVERIFY(second.isNull());
+}
+
+void ScreenshotServiceTest::overlaySecondaryScreenGeometry()
+{
+    // 模拟副屏：遮罩摆在非原点的全局几何位置，映射必须只依赖遮罩局部坐标，
+    // 否则多显示器下选区与裁剪会随屏幕偏移错位。
+    QImage desktop(400, 300, QImage::Format_RGB32);
+    desktop.fill(QColor(250, 250, 250));
+    QPainter painter(&desktop);
+    painter.fillRect(0, 0, 20, 20, QColor(10, 10, 10));
+    painter.end();
+    ScreenshotOverlay overlay(desktop);
+    overlay.setGeometry(1920, 100, 400, 300);
+    overlay.show();
+
+    sendMouse(overlay, QEvent::MouseButtonPress, QPoint(20, 20), Qt::LeftButton);
+    sendMouse(overlay, QEvent::MouseButtonRelease, QPoint(220, 170), Qt::LeftButton);
+    QVERIFY(overlay.isAnnotating());
+    QCOMPARE(overlay.selection(), QRectF(20, 20, 200, 150));
+
+    sendMouse(overlay, QEvent::MouseButtonPress, QPoint(30, 30), Qt::LeftButton);
+    sendMouse(overlay, QEvent::MouseMove, QPoint(100, 100), Qt::LeftButton);
+    sendMouse(overlay, QEvent::MouseButtonRelease, QPoint(100, 100), Qt::LeftButton);
+
+    QImage composed;
+    connect(&overlay, &ScreenshotOverlay::finished, [&composed](const QImage& image, bool) {
+        composed = image;
+    });
+    QTest::keyClick(&overlay, Qt::Key_Return);
+    QCOMPARE(composed.size(), QSize(200, 150));
+    // 选区从本屏 (20,20) 开始：屏幕自身的黑色角块不会进入裁剪结果。
+    QVERIFY(colorNear(composed.pixelColor(2, 2), QColor(250, 250, 250)));
+    QVERIFY(colorNear(composed.pixelColor(65, 65), QColor(230, 47, 47)));
 }
 
 QTEST_MAIN(ScreenshotServiceTest)

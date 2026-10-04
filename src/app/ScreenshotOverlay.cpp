@@ -2,12 +2,11 @@
 
 #include <QButtonGroup>
 #include <QComboBox>
+#include <QEvent>
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPushButton>
-#include <QScreen>
-#include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QToolButton>
 #include <cmath>
@@ -20,9 +19,9 @@ const QColor kColors[]{{230, 47, 47}, {47, 111, 224}, {247, 213, 29},
 const double kWidths[]{2, 4, 7};
 }
 
-ScreenshotOverlay::ScreenshotOverlay(const QImage& desktopImage, QWidget* parent)
+ScreenshotOverlay::ScreenshotOverlay(const QImage& screenImage, QWidget* parent)
     : QWidget(parent, Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint | Qt::Tool)
-    , m_image(desktopImage)
+    , m_image(screenImage)
 {
     // 测试注入的图像可能没有 DPR；截屏得到的图像已由 Qt 设置。
     if (m_image.devicePixelRatio() <= 0)
@@ -30,9 +29,6 @@ ScreenshotOverlay::ScreenshotOverlay(const QImage& desktopImage, QWidget* parent
     m_imageLogical = QSizeF(m_image.size()) / m_image.devicePixelRatio();
     setMouseTracking(true);
     setCursor(Qt::CrossCursor);
-    const QScreen* screen = QGuiApplication::primaryScreen();
-    const QRect geometry = screen ? screen->virtualGeometry() : QRect(0, 0, 800, 600);
-    setGeometry(geometry);
     createToolbar();
     m_toolbar->hide();
 }

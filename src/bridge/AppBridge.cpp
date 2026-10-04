@@ -33,6 +33,7 @@
 #include <QTimer>
 #include <QUrl>
 #include <QWidget>
+#include <utility>
 
 namespace
 {
@@ -374,16 +375,8 @@ QVariantMap AppBridge::saveScreenshotHotkey(int modifier, int key)
     return saved;
 }
 
-// 抓取整个虚拟桌面的图像。
-QImage AppBridge::grabDesktopImage() const
-{
-    QScreen* screen = QGuiApplication::primaryScreen();
-    if (!screen)
-        return QImage();
-    return screen->grabWindow(0).toImage();
-}
-
-// 隐藏主窗口后抓取桌面并显示遮罩；结束后恢复剪贴板、历史与窗口可见性。
+// 逐屏抓取并显示遮罩；选区限制在所在屏幕内，按各屏 DPR 精确映射，
+// 保证混合 DPI（如 4K 150% + 1080p 100%）下坐标与分辨率都正确。
 void AppBridge::beginScreenshot(bool restoreWindow)
 {
     if (!m_nativeIntegration || m_screenshotBusy)
@@ -393,8 +386,17 @@ void AppBridge::beginScreenshot(bool restoreWindow)
         m_window->hide();
     // 等待窗口真正从屏幕消失后再抓取，避免把本程序截进图里。
     QTimer::singleShot(restoreWindow ? 260 : 80, this, [this, restoreWindow]() {
-        const QImage desktop = grabDesktopImage();
-        if (desktop.isNull()) {
+        struct ScreenCapture {
+            QRect geometry;
+            QImage image;
+        };
+        QList<ScreenCapture> captures;
+        for (QScreen* screen : QGuiApplication::screens()) {
+            const QImage image = screen->grabWindow(0).toImage();
+            if (!image.isNull())
+                captures.append({screen->geometry(), image});
+        }
+        if (captures.isEmpty()) {
             m_screenshotBusy = false;
             if (restoreWindow && m_window)
                 m_window->show();
@@ -402,24 +404,35 @@ void AppBridge::beginScreenshot(bool restoreWindow)
                 QStringLiteral("无法截取屏幕内容，请重试或联系开发者。"));
             return;
         }
-        auto* overlay = new ScreenshotOverlay(desktop);
-        m_overlay = overlay;
-        connect(overlay, &ScreenshotOverlay::finished, this,
-            [this, overlay, restoreWindow](const QImage& image, bool cancelled) {
-            Q_UNUSED(cancelled)
-            m_screenshotBusy = false;
-            m_overlay.clear();
-            overlay->deleteLater();
-            if (!image.isNull()) {
-                QApplication::clipboard()->setImage(image);
-                m_screenshots->add(image, QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
-            }
-            if (restoreWindow && m_window)
-                m_window->show();
-        });
-        overlay->show();
-        overlay->raise();
-        overlay->activateWindow();
+        for (const ScreenCapture& capture : captures) {
+            auto* overlay = new ScreenshotOverlay(capture.image);
+            overlay->setGeometry(capture.geometry);
+            m_overlays.append(overlay);
+            connect(overlay, &ScreenshotOverlay::finished, this,
+                [this, overlay, restoreWindow](const QImage& image, bool cancelled) {
+                Q_UNUSED(cancelled)
+                overlay->deleteLater();
+                m_overlays.removeAll(overlay);
+                // 本轮截图由第一个完成的遮罩处理；其余遮罩随关闭只做销毁。
+                if (!m_screenshotBusy)
+                    return;
+                m_screenshotBusy = false;
+                for (const QPointer<ScreenshotOverlay>& other : std::as_const(m_overlays)) {
+                    if (other)
+                        other->close();
+                }
+                m_overlays.clear();
+                if (!image.isNull()) {
+                    QApplication::clipboard()->setImage(image);
+                    m_screenshots->add(image, QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
+                }
+                if (restoreWindow && m_window)
+                    m_window->show();
+            });
+            overlay->show();
+            overlay->raise();
+            overlay->activateWindow();
+        }
     });
 }
 
@@ -428,7 +441,7 @@ QVariantMap AppBridge::startScreenshot()
 {
     if (!m_nativeIntegration)
         return ServiceResult::failure(QStringLiteral("当前环境不支持截图功能。"));
-    if (m_screenshotBusy || !m_overlay.isNull())
+    if (m_screenshotBusy || !m_overlays.isEmpty())
         return ServiceResult::failure(QStringLiteral("截图正在进行中，请先完成或取消。"));
     beginScreenshot(m_window && m_window->isVisible());
     return ServiceResult::success();

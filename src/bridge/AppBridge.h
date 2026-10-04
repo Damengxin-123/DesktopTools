@@ -251,18 +251,16 @@ private:
     GlobalHotkey* m_screenshotHotkey;
     // 启动时截图热键注册失败的说明。
     QString m_screenshotHotkeyWarning;
-    // 正在显示的截图遮罩；确认或取消后置空。
-    QPointer<ScreenshotOverlay> m_overlay;
     // 截图流程进行中，避免重复触发。
     bool m_screenshotBusy = false;
+    // 每块屏幕一个截图遮罩；收到 finished 后逐个销毁。
+    QList<QPointer<ScreenshotOverlay>> m_overlays;
     // 是否启用系统级交互（热键注册、截屏遮罩）。
     bool m_nativeIntegration;
     // 全局热键注册器。
     GlobalHotkey* m_hotkey;
     // 启动时热键注册失败的说明。
     QString m_hotkeyWarning;
-    // 隐藏主窗口后抓取桌面并显示遮罩；完成后恢复剪贴板、历史与窗口。
+    // 隐藏主窗口后逐屏抓取并显示遮罩；完成后恢复剪贴板、历史与窗口。
     void beginScreenshot(bool restoreWindow);
-    // 抓取整个虚拟桌面的图像。
-    QImage grabDesktopImage() const;
 };

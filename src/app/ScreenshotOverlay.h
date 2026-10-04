@@ -10,15 +10,16 @@
 class QComboBox;
 class QWidget;
 
-// 全屏截图遮罩：按下热键后覆盖桌面，拖拽选择区域，随后在选区内添加标注，
-// 确认时合成与预览一致的图像。取消时发出空图像。
-// 遮罩坐标按“截图逻辑尺寸 / 遮罩尺寸”的比例映射到截图坐标，正常全屏使用下比值为 1。
+// 屏幕截图遮罩：覆盖一块屏幕，拖拽选择区域，随后在选区内添加标注，
+// 确认时合成与预览一致的图像。取消或直关闭时发出空图像。
+// 多显示器时每块屏幕一个遮罩，选区限制在所在屏幕内；遮罩坐标按
+// “截图逻辑尺寸 / 遮罩尺寸”映射到截图坐标，因此各屏幕按自身 DPR 精确取图。
 class ScreenshotOverlay final : public QWidget
 {
     Q_OBJECT
 public:
-    // desktopImage 为整个虚拟桌面的截图（设备像素）。
-    explicit ScreenshotOverlay(const QImage& desktopImage, QWidget* parent = nullptr);
+    // screenImage 为所在屏幕的截图（设备像素）；调用方负责把遮罩摆到对应屏幕。
+    explicit ScreenshotOverlay(const QImage& screenImage, QWidget* parent = nullptr);
     // 当前是否处于选区标注阶段（供测试与状态查询）。
     bool isAnnotating() const { return m_state == Annotating; }
     // 当前选区（遮罩逻辑坐标）。
@@ -64,7 +65,7 @@ private:
     // 绘制选区边框。
     void drawSelectionBorder(QPainter* painter) const;
 
-    // 桌面截图（设备像素）。
+    // 所在屏幕的截图（设备像素）。
     QImage m_image;
     // 截图逻辑尺寸（设备像素 / DPR）。
     QSizeF m_imageLogical;
