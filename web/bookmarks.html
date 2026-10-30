@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' qrc:; style-src 'self' 'unsafe-inline'; img-src data: qrc:; font-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>网页书签</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="navigation.css">
+  <link rel="stylesheet" href="bookmark-panel.css">
+  <script defer src="i18n-en.js"></script>
+  <script defer src="i18n.js"></script>
+  <script defer src="qrc:///qtwebchannel/qwebchannel.js"></script>
+  <script defer src="bridge.js"></script>
+  <script defer src="icons.js"></script>
+  <script defer src="bookmark-panel.js"></script>
+</head>
+<body>
+  <div class="bookmark-panel">
+    <header class="bookmark-head">
+      <div>
+        <div class="eyebrow">BOOKMARKS</div>
+        <h1>网页书签</h1>
+        <p>左侧管理书签，右侧正常浏览网页。</p>
+      </div>
+      <button id="bookmark-add" class="button primary small" type="button"><span aria-hidden="true">＋</span>新建书签</button>
+    </header>
+    <div id="bookmark-error" class="notice warning" role="alert" hidden></div>
+    <label class="search-field bookmark-search"><span aria-hidden="true">⌕</span><input id="bookmark-search" type="search" placeholder="搜索名称或网址…" aria-label="搜索书签"></label>
+    <div class="selection-toolbar compact">
+      <label class="check-label"><input id="bookmark-select-all" type="checkbox">全选</label>
+      <span id="bookmark-selection-info" class="muted">0 个书签</span>
+      <button id="bookmark-delete-selected" class="button danger quiet" type="button" disabled>删除已选</button>
+    </div>
+    <div id="bookmark-list" class="bookmark-list" aria-label="书签列表"></div>
+    <div id="bookmark-empty" class="empty-state" hidden>
+      <div class="empty-icon" aria-hidden="true">🔖</div>
+      <h2>还没有书签</h2>
+      <p>点击“新建书签”，输入网址后会自动读取网页标题。</p>
+      <button id="bookmark-empty-add" class="button secondary" type="button">新建书签</button>
+    </div>
+    <footer id="bookmark-current" class="bookmark-current" hidden>
+      <span id="bookmark-current-url" class="muted">当前网页：—</span>
+      <button id="bookmark-add-current" class="button secondary small" type="button">＋ 收藏当前网页</button>
+    </footer>
+  </div>
+
+  <dialog id="bookmark-dialog" class="app-dialog" aria-labelledby="bookmark-dialog-title">
+    <form id="bookmark-dialog-form">
+      <div class="dialog-heading">
+        <h2 id="bookmark-dialog-title">新建书签</h2>
+        <button id="bookmark-dialog-close" class="icon-button" type="button" aria-label="关闭书签对话框">×</button>
+      </div>
+      <label class="form-field" for="bookmark-url"><span>网页地址</span>
+        <div class="input-with-button">
+          <input id="bookmark-url" type="text" placeholder="example.com 或 https://example.com" autocomplete="off" spellcheck="false">
+          <button id="bookmark-probe" class="button secondary" type="button">检测标题</button>
+        </div>
+      </label>
+      <p class="field-help">可点击“检测标题”自动填写名称，也可以直接手动填写后保存。</p>
+      <label class="form-field" for="bookmark-name"><span>书签名称</span>
+        <input id="bookmark-name" type="text" maxlength="200" placeholder="检测成功后会自动填入网页标题" autocomplete="off">
+      </label>
+      <p id="bookmark-probe-state" class="field-help" role="status"></p>
+      <p id="bookmark-dialog-error" class="field-error" role="alert" hidden></p>
+      <div class="dialog-actions">
+        <button id="bookmark-dialog-cancel" class="button secondary" type="button">取消</button>
+        <button id="bookmark-dialog-submit" class="button primary" type="submit">保存</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="bookmark-toast" class="bookmark-toast" role="status" hidden></div>
+</body>
+</html>

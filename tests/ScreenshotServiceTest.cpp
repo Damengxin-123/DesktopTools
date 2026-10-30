@@ -108,6 +108,8 @@ private slots:
     void overlayHighDpiAlignment();
     // 默认移动工具：框内拖动移动选区、手柄缩放、框外拖动重新选区、右键取消。
     void overlayMoveResizeAndReselect();
+    // 多显示器：一块屏幕重新框选时，其余屏幕遮罩的旧选区与工具栏收起。
+    void overlayCrossScreenReselection();
     // 文字标注：编辑器放置、Esc 丢弃、Enter 提交并渲染进合成图。
     void overlayTextAnnotation();
 };
@@ -259,6 +261,10 @@ void ScreenshotServiceTest::overlaySelectionAndAnnotation()
     sendMouse(overlay, QEvent::MouseMove, QPoint(120, 80), Qt::LeftButton);
     sendMouse(overlay, QEvent::MouseButtonRelease, QPoint(220, 170), Qt::LeftButton);
     QVERIFY(overlay.isAnnotating());
+    QCOMPARE(overlay.selection(), QRectF(20, 20, 200, 150));
+
+    // 松开鼠标后选区必须锁定：无按键的移动（鼠标跟踪会持续派发）不得再改变选区。
+    sendMouse(overlay, QEvent::MouseMove, QPoint(300, 250), Qt::NoButton);
     QCOMPARE(overlay.selection(), QRectF(20, 20, 200, 150));
 
     // 默认工具为移动；切换到画笔后画一条红色折线，落点在选区内。
@@ -446,17 +452,27 @@ void ScreenshotServiceTest::overlayMoveResizeAndReselect()
     sendMouse(overlay, QEvent::MouseButtonRelease, QPoint(350, 240), Qt::LeftButton);
     QCOMPARE(overlay.selection(), QRectF(120, 120, 230, 120));
 
+    // 工具栏锚定在选区上：重新框选期间旧工具栏随旧选区一起消失，
+    // 选出新选区后按新位置重新出现。
+    QWidget* toolbar = overlay.findChild<QWidget*>(QStringLiteral("screenshotToolbar"));
+    QVERIFY(toolbar);
+    QVERIFY(toolbar->isVisible());
+
     // 框外拖动表示重新框选，替换旧选区。
     sendMouse(overlay, QEvent::MouseButtonPress, QPoint(20, 20), Qt::LeftButton);
+    QVERIFY(!toolbar->isVisible());
     sendMouse(overlay, QEvent::MouseMove, QPoint(90, 90), Qt::LeftButton);
     sendMouse(overlay, QEvent::MouseButtonRelease, QPoint(90, 90), Qt::LeftButton);
     QCOMPARE(overlay.selection(), QRectF(20, 20, 70, 70));
     QVERIFY(overlay.isAnnotating());
+    QVERIFY(toolbar->isVisible());
 
-    // 框外过小的拖拽视为误触：恢复原选区而不是清空。
+    // 框外过小的拖拽视为误触：恢复原选区而不是清空，工具栏也随之恢复。
     sendMouse(overlay, QEvent::MouseButtonPress, QPoint(350, 150), Qt::LeftButton);
+    QVERIFY(!toolbar->isVisible());
     sendMouse(overlay, QEvent::MouseButtonRelease, QPoint(353, 152), Qt::LeftButton);
     QCOMPARE(overlay.selection(), QRectF(20, 20, 70, 70));
+    QVERIFY(toolbar->isVisible());
 
     // 右键取消整次截图。
     bool cancelled = false;
@@ -465,6 +481,56 @@ void ScreenshotServiceTest::overlayMoveResizeAndReselect()
     });
     sendMouse(overlay, QEvent::MouseButtonPress, QPoint(50, 50), Qt::RightButton);
     QVERIFY(cancelled);
+}
+
+void ScreenshotServiceTest::overlayCrossScreenReselection()
+{
+    // 多显示器下每块屏幕一个独立遮罩窗口：在 A 屏锁定选区后到 B 屏重新
+    // 框选，A 屏收不到任何鼠标事件，旧选区与工具栏须由联动主动收起。
+    QImage desktop(400, 300, QImage::Format_RGB32);
+    desktop.fill(QColor(250, 250, 250));
+    ScreenshotOverlay first(desktop);
+    first.setGeometry(0, 0, 400, 300);
+    ScreenshotOverlay second(desktop);
+    second.setGeometry(1920, 0, 400, 300);
+    // 与 AppBridge 相同的联动：任一遮罩开始新框选时收起其余遮罩的选区。
+    connect(&first, &ScreenshotOverlay::newSelectionStarted,
+        &second, &ScreenshotOverlay::dismissSelection);
+    connect(&second, &ScreenshotOverlay::newSelectionStarted,
+        &first, &ScreenshotOverlay::dismissSelection);
+    first.show();
+    second.show();
+
+    // A 屏框选并锁定，工具栏可见。
+    sendMouse(first, QEvent::MouseButtonPress, QPoint(20, 20), Qt::LeftButton);
+    sendMouse(first, QEvent::MouseButtonRelease, QPoint(220, 170), Qt::LeftButton);
+    QVERIFY(first.isAnnotating());
+    QWidget* firstToolbar = first.findChild<QWidget*>(QStringLiteral("screenshotToolbar"));
+    QVERIFY(firstToolbar);
+    QVERIFY(firstToolbar->isVisible());
+
+    // B 屏开始框选的瞬间：A 屏选区与工具栏立即收起，回到待框选状态。
+    sendMouse(second, QEvent::MouseButtonPress, QPoint(30, 30), Qt::LeftButton);
+    QVERIFY(!first.isAnnotating());
+    QVERIFY(first.selection().isNull());
+    QVERIFY(!firstToolbar->isVisible());
+
+    // B 屏正常锁定，工具栏出现在 B 屏。
+    sendMouse(second, QEvent::MouseButtonRelease, QPoint(200, 150), Qt::LeftButton);
+    QVERIFY(second.isAnnotating());
+    QCOMPARE(second.selection(), QRectF(30, 30, 170, 120));
+    QWidget* secondToolbar = second.findChild<QWidget*>(QStringLiteral("screenshotToolbar"));
+    QVERIFY(secondToolbar);
+    QVERIFY(secondToolbar->isVisible());
+
+    // 回到 A 屏重新框选：B 屏收起，A 屏可重新锁定。
+    sendMouse(first, QEvent::MouseButtonPress, QPoint(40, 40), Qt::LeftButton);
+    QVERIFY(!second.isAnnotating());
+    QVERIFY(second.selection().isNull());
+    QVERIFY(!secondToolbar->isVisible());
+    sendMouse(first, QEvent::MouseButtonRelease, QPoint(240, 180), Qt::LeftButton);
+    QVERIFY(first.isAnnotating());
+    QCOMPARE(first.selection(), QRectF(40, 40, 200, 140));
 }
 
 void ScreenshotServiceTest::overlayTextAnnotation()

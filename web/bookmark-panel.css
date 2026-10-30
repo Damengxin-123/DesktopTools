@@ -1,0 +1,35 @@
+/* 书签窗口左侧面板：与窗口右侧浏览区并列，独立滚动与管理操作。 */
+.bookmark-panel{display:flex;flex-direction:column;height:100vh;padding:22px 18px 16px;box-sizing:border-box;background:var(--canvas);color:var(--ink)}
+.bookmark-head h1{font-size:22px;margin:0}
+.bookmark-head p{margin:8px 0 0;font-size:12px;color:var(--muted);line-height:1.7}
+.bookmark-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:18px}
+.bookmark-search{max-width:none;margin-bottom:12px;border-radius:8px}
+.bookmark-search input{padding:9px 0;font-size:12px}
+.selection-toolbar.compact{padding:0;min-height:34px;border:0}
+.bookmark-list{flex:1;min-height:0;overflow:auto;background:#fff;border:1px solid var(--line);border-radius:11px;padding:7px}
+.bookmark-list:empty{display:none}
+.bookmark-row{border:1px solid transparent;border-radius:7px;padding:10px;margin-bottom:3px;display:flex;gap:9px;align-items:flex-start}
+.bookmark-row:hover{background:#f7f9fd}
+.bookmark-row.active{background:#eef2ff;border-color:#e1e8ff}
+.bookmark-row.selected{border-color:#b0c2ff}
+.bookmark-row.drag-over{border-top:3px solid var(--accent);padding-top:7px}
+.bookmark-row>input{margin:3px 0 0}
+.bookmark-content{flex:1;min-width:0;cursor:pointer}
+.bookmark-name{display:block;width:100%;text-align:left;border:0;background:none;padding:0;font-size:var(--list-font-size);font-weight:600;color:#4a5870;line-height:1.5;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bookmark-name:hover{color:var(--accent)}
+.bookmark-url{display:block;margin-top:6px;font-size:11px;color:#9aa4b6;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bookmark-actions{display:flex;gap:2px;flex-shrink:0}
+.bookmark-empty-hint{grid-column:1/-1}
+.bookmark-current{border-top:1px solid var(--line);padding-top:11px;margin-top:11px;display:flex;align-items:center;gap:10px;flex-shrink:0}
+.bookmark-current-url{flex:1;min-width:0;font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#bookmark-current-url{flex:1;min-width:0}
+.bookmark-toast{position:fixed;left:18px;bottom:26px;z-index:20;padding:10px 14px;background:#fff;border:1px solid var(--line);border-radius:9px;box-shadow:0 5px 22px #253b6420;font-size:12px;color:#62718b;max-width:calc(100% - 40px);overflow-wrap:anywhere}
+.bookmark-toast.success{border-left:3px solid #55ae91}
+.bookmark-toast.error{border-left:3px solid #ce6770;color:#b04e58}
+.bookmark-toast.warning{border-left:3px solid #cfac55}
+.bookmark-current .button{padding:5px 9px;font-size:11px}
+/* 面板宽度较窄，对话框按面板可用宽度收窄。 */
+.app-dialog{width:420px}
+.input-with-button .button{white-space:nowrap}
+/* 内嵌后支持窄面板：表单和标题按钮不挤出可视区域。 */
+@media(max-width:420px){.bookmark-head{flex-direction:column;gap:10px}.bookmark-panel{padding:16px 12px}.app-dialog{padding:18px 14px;max-width:calc(100vw - 20px)}.bookmark-current{flex-wrap:wrap}.bookmark-current>span{width:100%;overflow-wrap:anywhere}.bookmark-row{padding:9px 5px;gap:6px}.bookmark-actions{flex-direction:column}.bookmark-actions .ui-icon{width:17px;height:17px}}

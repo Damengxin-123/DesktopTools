@@ -14,6 +14,8 @@ class SettingsService final : public QObject
 public:
     // 加载配置；可注入当前用户的自启存储，空指针用于隔离系统操作的测试。
     explicit SettingsService(const QString& dataRoot, QObject* parent = nullptr, QSettings* startupSettings = nullptr);
+    // 生成自启命令；默认 data 目录无需参数，自定义目录仍保留绝对路径。
+    static QString startupCommand(const QString& dataRoot);
     // 获取网页使用的设置字段。
     QVariantMap snapshot() const;
     // 校验完整设置并探测下载目录可写性，兼容未传下载目录的旧调用方。

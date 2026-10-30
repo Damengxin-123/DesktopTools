@@ -16,6 +16,8 @@ class QWidget;
 // 确认时合成与预览一致的图像。取消或直关闭时发出空图像。
 // 多显示器时每块屏幕一个遮罩，选区限制在所在屏幕内；遮罩坐标按
 // “截图逻辑尺寸 / 遮罩尺寸”映射到截图坐标，因此各屏幕按自身 DPR 精确取图。
+// 任一遮罩开始新的框选时，其余遮罩应收起旧选区与工具栏：持有方把
+// newSelectionStarted 转发给其余遮罩的 dismissSelection。
 // 选区出现后的默认工具是“移动”：框内拖动整体移动选区，边框上的 8 个手柄
 // 微调大小，框外拖动重新选区；文字工具点击选区内放置行内输入框。
 class ScreenshotOverlay final : public QWidget
@@ -30,9 +32,14 @@ public:
     QRectF selection() const { return m_selection; }
     // 已提交的标注数量（供测试与状态查询）。
     int annotationCount() const { return m_strokes.size(); }
+    // 收起本遮罩的选区与工具栏，回到待框选状态。
+    // 多显示器下另一屏幕开始重新框选时由持有方调用。
+    void dismissSelection();
 signals:
     // 确认时 image 为选区内带标注的合成图像；取消时 image 为空。
     void finished(const QImage& image, bool cancelled);
+    // 本遮罩开始一次全新的框选（首次框选或替换旧选区）时发出。
+    void newSelectionStarted();
 protected:
     void paintEvent(QPaintEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;

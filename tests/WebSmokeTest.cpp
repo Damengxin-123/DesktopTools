@@ -1,5 +1,14 @@
 #include "app/WebWindow.h"
+#include "app/PaintWindow.h"
+#include "level/LevelWindow.h"
+#include "level/LevelDocument.h"
+#include "app/InterfaceLanguage.h"
+#include <QLabel>
+#include "app/BookmarkWindow.h"
+#include "services/SettingsService.h"
 #include "app/GlobalHotkey.h"
+#include "services/MediaService.h"
+#include <QProcess>
 #include "bridge/AppBridge.h"
 #include "services/ClipboardService.h"
 #include "services/EmojiService.h"
@@ -14,12 +23,18 @@
 #include <QEventLoop>
 #include <QFile>
 #include <QFileInfo>
+#include <QCryptographicHash>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QLineEdit>
 #include <QMimeData>
+#include <QMessageBox>
+#include <QAbstractButton>
 #include <QImage>
 #include <QPainter>
 #include <QPointer>
+#include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QTest>
 #include <QTimer>
@@ -32,6 +47,16 @@ class WebSmokeTest final : public QObject
 {
     Q_OBJECT
 private slots:
+    // 验证新增画板导航、真实桥接及复用已有窗口。
+    void paintThroughPage();
+    // 验证关卡列表、真实网页入口、窗口复用及目录标识校验。
+    void levelLayoutThroughPage();
+    // 切换语言不重载页面，也不修改与界面文案同名的用户数据及未保存草稿。
+    void liveLanguageSwitch();
+    // 页面阻塞时退出确认会超时，取消退出后迟到回调不能关闭窗口。
+    void quitTimeoutKeepsWindow();
+    // 验证内嵌书签、折叠尺寸及功能配置的真实持久化与恢复。
+    void navigationAndBookmarks();
     // 使用独立临时数据目录测试页面交互，不访问用户数据。
     void htmlAndBackend();
     // 检查两阶段热键切换以及配置写入失败后的旧组合保留。
@@ -44,6 +69,10 @@ private slots:
     void damagedDownloadHistoryIsIsolated();
     // 验证剪贴板类型设置、卡片、搜索、置顶、详情和批量删除。
     void clipboardThroughPage();
+    // 使用文本和满页缩略图分别覆盖删除确认弹窗的原生合成与交互。
+    void clipboardDeleteDialogStable_data();
+    // 持续采样弹窗像素、位置和命中目标，验证刷新期间仍可原生点击。
+    void clipboardDeleteDialogStable();
     // 剪贴板索引损坏时保留原文件，其他页面继续可用。
     void damagedClipboardHistoryIsIsolated();
     // 验证表情页卡片、关键字搜索、分类筛选、编辑、复制文件与删除。
@@ -56,10 +85,138 @@ private slots:
     void qrThroughPage();
     // 验证截图页：历史列表、复制、删除、预览与热键保存。
     void screenshotsThroughPage();
+    // 验证文件检索页：索引状态、关键词检索、语法过滤与无结果提示。
+    void fileSearchThroughPage();
 private:
     // 同步等待一次短 JavaScript 求值，带超时防止测试挂起。
     static QVariant evaluate(QWebEnginePage* page, const QString& source);
 };
+
+void WebSmokeTest::levelLayoutThroughPage()
+{
+    QTemporaryDir data;
+    QVERIFY(data.isValid());
+    QVERIFY(QDir(data.path()).mkdir("level-layouts"));
+    LevelDocument document;
+    document.title = QStringLiteral("北侧 <花园>");
+    document.objects.append(LevelDrawing::preset(QStringLiteral("绿化"), {0,0}));
+    QString error;
+    QVERIFY(document.write(data.filePath("level-layouts/garden.level.json"), error));
+    WebWindow window(data.path(), false);
+    window.show();
+    auto* page = window.webView()->page();
+    QTRY_VERIFY_WITH_TIMEOUT(evaluate(page, QStringLiteral("document.documentElement && document.documentElement.dataset.ready === 'true'")).toBool(), 20000);
+    evaluate(page, QStringLiteral("document.querySelector('[data-page=level-layout]').click(); true"));
+    QVERIFY(evaluate(page, QStringLiteral("!document.getElementById('page-level-layout').hidden")).toBool());
+    QTRY_COMPARE_WITH_TIMEOUT(evaluate(page, QStringLiteral("document.querySelectorAll('.level-project-card').length")).toInt(), 1, 5000);
+    QCOMPARE(evaluate(page, QStringLiteral("document.querySelector('.level-project-card h2').textContent")).toString(), document.title);
+    evaluate(page, QStringLiteral("document.querySelector('.level-project-card button').click(); true"));
+    QTRY_VERIFY_WITH_TIMEOUT(window.findChild<LevelWindow*>(), 5000);
+    auto* editor = window.findChild<LevelWindow*>();
+    QVERIFY(editor->isVisible());
+    auto* bridge = window.findChild<AppBridge*>();
+    QVERIFY(bridge);
+    QVERIFY(bridge->openLevelLayout("garden.level.json").value("ok").toBool());
+    QCOMPARE(window.findChildren<LevelWindow*>().size(), 1);
+    QVERIFY(!bridge->openLevelLayout("../outside.level.json").value("ok").toBool());
+    QVERIFY(editor->close());
+    QCoreApplication::sendPostedEvents(nullptr,QEvent::DeferredDelete);
+}
+
+void WebSmokeTest::paintThroughPage()
+{
+    QTemporaryDir data;
+    QVERIFY(data.isValid());
+    WebWindow window(data.path(), false);
+    window.show();
+    auto* page = window.webView()->page();
+    QTRY_VERIFY_WITH_TIMEOUT(evaluate(page, QStringLiteral("document.documentElement && document.documentElement.dataset.ready === 'true'")).toBool(), 20000);
+    evaluate(page, QStringLiteral("document.querySelector('[data-page=paint]').click(); true"));
+    QVERIFY(evaluate(page, QStringLiteral("!document.getElementById('page-paint').hidden")).toBool());
+    evaluate(page, QStringLiteral("document.getElementById('open-paint-window').click(); true"));
+    QTRY_VERIFY_WITH_TIMEOUT(window.findChild<PaintWindow*>(), 5000);
+    auto* paint = window.findChild<PaintWindow*>();
+    QVERIFY(paint->isVisible());
+    evaluate(page, QStringLiteral("document.getElementById('open-paint-window').click(); true"));
+    QTest::qWait(80);
+    QCOMPARE(window.findChildren<PaintWindow*>().size(), 1);
+    QCOMPARE(window.findChild<PaintWindow*>(), paint);
+    QVERIFY(paint->close());
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+}
+
+void WebSmokeTest::liveLanguageSwitch()
+{
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+    WebWindow window(root.path(), false);
+    window.show();
+    auto* page = window.webView()->page();
+    QTRY_VERIFY_WITH_TIMEOUT(evaluate(page, QStringLiteral("document.documentElement && document.documentElement.dataset.ready === 'true'")).toBool(), 20000);
+    QLabel nativeCaption, nativeUserText, nativeFileTitle;
+    InterfaceLanguage::bind(&nativeCaption, "text", QStringLiteral("保存"));
+    InterfaceLanguage::bind(&nativeFileTitle, "text", QStringLiteral("图像浏览器 — 设置.png"));
+    nativeUserText.setText(QStringLiteral("保存"));
+    QSignalSpy reloads(window.webView(), &QWebEngineView::loadStarted);
+    auto* backend = window.findChild<AppBridge*>();
+    QVERIFY(backend);
+    const auto savedNote = backend->saveNote({{"title", QStringLiteral("设置")},
+        {"categoryId", QStringLiteral("default")}, {"html", QStringLiteral("<p>保存 文件检索</p>")}});
+    QVERIFY(savedNote.value("ok").toBool());
+    const QString noteId = savedNote.value("data").toMap().value("id").toString();
+    const auto beforeNote = backend->getNote(noteId);
+    evaluate(page, QStringLiteral(R"JS(
+        document.querySelector('[data-page=settings]').click();
+        window.__languagePageIdentity = {};
+        window.__originalIdentity = window.__languagePageIdentity;
+        const editor = document.getElementById('note-editor');
+        editor.innerHTML = '<p>设置 保存 文件检索 — 用户内容</p>';
+        window.__editorNode = editor.firstChild;
+        document.getElementById('note-title').value = '设置';
+        const userNode = document.createElement('div');
+        userNode.id = 'language-user-data';
+        userNode.textContent = '设置'; userNode.title = '保存';
+        document.body.append(userNode);
+        document.getElementById('font-size').value = '23';
+        document.getElementById('font-size').dispatchEvent(new Event('input', {bubbles:true}));
+        const language = document.getElementById('interface-language');
+        language.value = 'en'; language.dispatchEvent(new Event('change', {bubbles:true}));
+        true;
+    )JS"));
+    QTRY_VERIFY_WITH_TIMEOUT(evaluate(page, QStringLiteral("document.documentElement.lang === 'en' && !document.getElementById('interface-language').disabled")).toBool(), 10000);
+    QCOMPARE(evaluate(page, QStringLiteral("document.getElementById('settings-heading').textContent")).toString(), QStringLiteral("Settings"));
+    QCOMPARE(evaluate(page, QStringLiteral("document.querySelector('[data-page=filesearch] .nav-text').textContent.trim()")).toString(), QStringLiteral("File search"));
+    QVERIFY(evaluate(page, QStringLiteral(R"JS(
+        document.getElementById('note-editor').firstChild === window.__editorNode
+        && document.getElementById('note-editor').textContent === '设置 保存 文件检索 — 用户内容'
+        && document.getElementById('note-title').value === '设置'
+        && document.getElementById('language-user-data').textContent === '设置'
+        && document.getElementById('language-user-data').title === '保存'
+        && document.getElementById('font-size').value === '23'
+        && window.__languagePageIdentity === window.__originalIdentity
+    )JS")).toBool());
+    QCOMPARE(nativeCaption.text(), QStringLiteral("Save"));
+    QCOMPARE(nativeUserText.text(), QStringLiteral("保存"));
+    QCOMPARE(nativeFileTitle.text(), QStringLiteral("Image viewer — 设置.png"));
+    QCOMPARE(backend->getNote(noteId), beforeNote);
+    QCOMPARE(reloads.count(), 0);
+    QVERIFY(evaluate(page, QStringLiteral("window.desktopI18n.errorText('未知的设置字段：设置') === 'Unknown settings field: 设置'")).toBool());
+    const QString capture = qEnvironmentVariable("DESKTOPTOOL_LANGUAGE_CAPTURE");
+    if (!capture.isEmpty()) { QTest::qWait(500); QVERIFY(window.grab().save(capture)); }
+    SettingsService reopened(root.path());
+    QCOMPARE(reopened.snapshot().value("data").toMap().value("language").toString(), QStringLiteral("en"));
+    QCOMPARE(reopened.snapshot().value("data").toMap().value("fontSize").toInt(), 16);
+    evaluate(page, QStringLiteral("document.getElementById('interface-language').value='zh-CN'; document.getElementById('interface-language').dispatchEvent(new Event('change')); true"));
+    QTRY_COMPARE_WITH_TIMEOUT(evaluate(page, QStringLiteral("document.getElementById('settings-heading').textContent")).toString(), QStringLiteral("设置"), 10000);
+    QVERIFY(evaluate(page, QStringLiteral("document.getElementById('note-editor').firstChild === window.__editorNode")).toBool());
+    QTRY_VERIFY(!evaluate(page, QStringLiteral("document.getElementById('interface-language').disabled")).toBool());
+    QCOMPARE(nativeCaption.text(), QStringLiteral("保存"));
+    QVERIFY(backend->setInterfaceLanguage(QStringLiteral("en")).value("ok").toBool());
+    window.webView()->reload();
+    QTRY_VERIFY_WITH_TIMEOUT(evaluate(page, QStringLiteral("document.documentElement.dataset.ready === 'true' && document.documentElement.lang === 'en' && document.getElementById('interface-language').value === 'en'")).toBool(), 20000);
+    QCOMPARE(backend->getNote(noteId), beforeNote);
+    QVERIFY(backend->setInterfaceLanguage(QStringLiteral("zh-CN")).value("ok").toBool());
+}
 
 void WebSmokeTest::settingsTransaction()
 {
@@ -127,6 +284,101 @@ QVariant WebSmokeTest::evaluate(QWebEnginePage* page, const QString& source)
     return result;
 }
 
+void WebSmokeTest::quitTimeoutKeepsWindow()
+{
+    QTemporaryDir data;
+    QVERIFY(data.isValid());
+    WebWindow window(data.path(), false);
+    window.show();
+    auto* page = window.webView()->page();
+    QTRY_VERIFY_WITH_TIMEOUT(evaluate(page, QStringLiteral(
+        "document.getElementById('workspace') && !document.getElementById('workspace').inert")).toBool(), 30000);
+    QVERIFY(evaluate(page, QStringLiteral(
+        "window.desktopToolCanClose = function() { const end = Date.now() + 4500;"
+        "while (Date.now() < end) {} return true; }; true")).toBool());
+    int confirmations = 0;
+    QTimer dismiss;
+    connect(&dismiss, &QTimer::timeout, &window, [&window, &confirmations]() {
+        for (auto* box : window.findChildren<QMessageBox*>()) {
+            if (box->isVisible()) {
+                ++confirmations;
+                box->button(QMessageBox::No)->click();
+            }
+        }
+    });
+    dismiss.start(20);
+    window.requestQuit();
+    QTRY_COMPARE_WITH_TIMEOUT(confirmations, 1, 4000);
+    QTest::qWait(2000);
+    QVERIFY(window.isVisible());
+    QCOMPARE(confirmations, 1);
+    // 取消后可再次发起退出请求，页面拒绝退出仍保持窗口。
+    QVERIFY(evaluate(page, QStringLiteral("window.desktopToolCanClose = function() { return false; }; true")).toBool());
+    window.requestQuit();
+    QTest::qWait(3200);
+    QVERIFY(window.isVisible());
+    QCOMPARE(confirmations, 1);
+}
+
+void WebSmokeTest::navigationAndBookmarks()
+{
+    QTemporaryDir data;
+    QVERIFY(data.isValid());
+    WebWindow window(data.path(), false);
+    window.show();
+    auto* page = window.webView()->page();
+    QTRY_VERIFY_WITH_TIMEOUT(evaluate(page, QStringLiteral("document.getElementById('workspace') && !document.getElementById('workspace').inert")).toBool(), 30000);
+    evaluate(page, QStringLiteral("document.getElementById('open-bookmark-window').click(); true"));
+    QTRY_VERIFY_WITH_TIMEOUT(window.findChild<BookmarkWindow*>(), 15000);
+    auto* bookmarks = window.findChild<BookmarkWindow*>();
+    QVERIFY(!bookmarks->isWindow());
+    QCOMPARE(bookmarks->parentWidget(), &window);
+    QTRY_VERIFY(bookmarks->isVisible());
+    const int expandedLeft = bookmarks->x();
+    evaluate(page, QStringLiteral("document.getElementById('sidebar-toggle').click(); true"));
+    QTRY_VERIFY_WITH_TIMEOUT(bookmarks->x() < expandedLeft, 10000);
+    QCOMPARE(bookmarks->x(), 58);
+    QVERIFY(evaluate(page, QStringLiteral("document.querySelectorAll('.nav-button .ui-icon').length === document.querySelectorAll('.nav-button').length")).toBool());
+    window.resize(960, 640);
+    QTRY_VERIFY(qAbs(bookmarks->width() - (window.width() - 58)) <= 1);
+    QTest::qWait(300);
+    QVERIFY(bookmarks->findChild<QLineEdit*>()->text().isEmpty());
+    QVERIFY(window.grab().save(QStringLiteral("out/testshots/bookmarks-embedded.png")));
+    evaluate(page, QStringLiteral("document.querySelector('[data-page=settings]').click(); true"));
+    QTRY_VERIFY(!bookmarks->isVisible());
+    evaluate(page, QStringLiteral(
+        "document.querySelector('[data-feature=bookmarks] button').click();"
+        "document.querySelector('[data-feature=shortcuts] input').click();"
+        "document.getElementById('settings-form').requestSubmit(); true"));
+    QTRY_VERIFY_WITH_TIMEOUT(evaluate(page, QStringLiteral("document.getElementById('settings-save-state').textContent === '已保存'")).toBool(), 10000);
+    QVERIFY(evaluate(page, QStringLiteral("document.querySelector('[data-page=shortcuts]').hidden && !document.querySelector('[data-page=settings]').hidden")).toBool());
+    SettingsService settings(data.path());
+    const auto stored = settings.snapshot().value("data").toMap();
+    QVERIFY(stored.value("sidebarCollapsed").toBool());
+    const auto items = stored.value("navigationItems").toList();
+    QCOMPARE(items.size(), evaluate(page, QStringLiteral("document.querySelectorAll('.main-nav .nav-button:not([data-page=settings])').length")).toInt());
+    QCOMPARE(items[1].toMap().value("id").toString(), QStringLiteral("bookmarks"));
+    QVERIFY(!items[0].toMap().value("visible").toBool());
+    evaluate(page, QStringLiteral("document.getElementById('feature-settings-list').scrollIntoView(); true"));
+    QTest::qWait(150);
+    QVERIFY(window.grab().save(QStringLiteral("out/testshots/navigation-settings.png")));
+    // 页面重载后从磁盘恢复，隐藏的初始功能自动切换到设置入口。
+    QSignalSpy loaded(page, &QWebEnginePage::loadFinished);
+    page->triggerAction(QWebEnginePage::Reload);
+    QVERIFY(loaded.wait(15000));
+    QElapsedTimer restored;
+    restored.start();
+    bool ready = false; // 页面重载必须等待新的桥接与设置恢复。
+    while (restored.elapsed() < 15000) {
+        ready = evaluate(page, QStringLiteral("document.getElementById('workspace') && !document.getElementById('workspace').inert && document.body.classList.contains('sidebar-collapsed') && document.querySelector('[data-page=shortcuts]').hidden && !document.getElementById('page-settings').hidden")).toBool();
+        if (ready) break;
+        QTest::qWait(100);
+    }
+    QVERIFY2(ready, qPrintable(evaluate(page, QStringLiteral("JSON.stringify({error: document.getElementById('connection-error').textContent, body: document.body.className, hidden: document.getElementById('page-settings').hidden, inert: document.getElementById('workspace').inert})")).toString()));
+    evaluate(page, QStringLiteral("document.getElementById('sidebar-toggle').click(); true"));
+    QTRY_VERIFY(!evaluate(page, QStringLiteral("document.body.classList.contains('sidebar-collapsed')")).toBool());
+}
+
 void WebSmokeTest::htmlAndBackend()
 {
     QTemporaryDir data;
@@ -144,6 +396,34 @@ void WebSmokeTest::htmlAndBackend()
         QTest::qWait(100);
     }
     QVERIFY2(ready, "HTML 页面未能完成初始化");
+    // 资源浏览器页、默认关联开关、手动设置入口与逐个设置向导必须在初始 DOM 中。
+    QVERIFY(evaluate(page, QStringLiteral(
+        "document.querySelector('#page-browser') !== null"
+        " && document.querySelector('#browser-image-openwith') !== null"
+        " && document.querySelector('#browser-video-openwith') !== null"
+        " && document.querySelector('#browser-openwith-wizard') !== null")).toBool());
+    // 手动设置对话框可打开；非原生环境下逐类型设置返回明确错误并显示在常驻提示区。
+    evaluate(page, QStringLiteral(
+        "document.querySelector('[data-page=browser]').click();"
+        "document.querySelector('#browser-image-openwith').click(); true"));
+    QTRY_VERIFY_WITH_TIMEOUT(evaluate(page, QStringLiteral(
+        "document.querySelector('#browser-openwith-dialog').open")).toBool(), 10000);
+    QVERIFY(evaluate(page, QStringLiteral(
+        "document.querySelectorAll('#browser-openwith-grid .browser-openwith-chip').length === 10")).toBool());
+    evaluate(page, QStringLiteral("document.querySelector('#browser-openwith-grid input').checked = true; document.querySelector('#browser-openwith-wizard').click(); true"));
+    QTRY_VERIFY_WITH_TIMEOUT(evaluate(page, QStringLiteral(
+        "!document.querySelector('#browser-error').hidden"
+        " && document.querySelector('#browser-error').textContent.includes('当前环境不支持')")).toBool(), 10000);
+    QVERIFY(evaluate(page, QStringLiteral(
+        "document.querySelectorAll('#browser-openwith-grid input:checked').length === 1")).toBool());
+    evaluate(page, QStringLiteral("document.querySelector('#browser-openwith-all').click(); true"));
+    QVERIFY(evaluate(page, QStringLiteral(
+        "document.querySelectorAll('#browser-openwith-grid input:checked').length === 10")).toBool());
+    evaluate(page, QStringLiteral("document.querySelector('#browser-openwith-none').click(); document.querySelector('#browser-openwith-wizard').click(); true"));
+    QTRY_VERIFY(evaluate(page, QStringLiteral("document.querySelector('#browser-openwith-progress').textContent.includes('至少勾选')")).toBool());
+    evaluate(page, QStringLiteral("document.querySelector('#browser-openwith-cancel').click(); true"));
+    QTRY_VERIFY_WITH_TIMEOUT(evaluate(page, QStringLiteral(
+        "!document.querySelector('#browser-openwith-dialog').open")).toBool(), 10000);
     QFile script(QStringLiteral(":/tests/web-smoke.js"));
     QVERIFY(script.open(QIODevice::ReadOnly));
     evaluate(page, QString::fromUtf8(script.readAll()));
@@ -199,6 +479,13 @@ void WebSmokeTest::htmlAndBackend()
             "c.dispatchEvent(new PointerEvent('pointermove', at(60, -140))); })(); true"));
         QTest::qWait(300);
         QVERIFY(window.grab().save(capturePath + ".gridmap-radius.png"));
+        // 资源浏览器页：两张浏览器卡片与默认关联开关（非原生环境为禁用态）。
+        // 网格图存在未保存修改，导航会弹同步确认框，离屏环境下预先放行。
+        evaluate(page, QStringLiteral(
+            "window.confirm = () => true;"
+            "document.querySelector('[data-page=browser]').click(); true"));
+        QTest::qWait(300);
+        QVERIFY(window.grab().save(capturePath + ".browser.png"));
     }
 }
 
@@ -378,7 +665,7 @@ void WebSmokeTest::clipboardThroughPage()
     auto* page = window.webView()->page();
     auto* service = window.findChild<ClipboardService*>();
     QVERIFY(service);
-    QTRY_VERIFY_WITH_TIMEOUT(evaluate(page, QStringLiteral("document.documentElement.dataset.ready === 'true'")).toBool(), 20000);
+    QTRY_VERIFY_WITH_TIMEOUT(evaluate(page, QStringLiteral("document.documentElement && document.documentElement.dataset.ready === 'true'")).toBool(), 20000);
     evaluate(page, QStringLiteral("document.querySelector('[data-page=clipboard]').click(); document.querySelector('#clipboard-types input[value=text]').click(); true"));
     QTRY_VERIFY(service->snapshot().value("data").toMap().value("types").toStringList().contains("text"));
     QTRY_VERIFY(!evaluate(page, QStringLiteral("document.querySelector('#clipboard-types').disabled")).toBool());
@@ -421,6 +708,175 @@ void WebSmokeTest::clipboardThroughPage()
     QVERIFY2(result.value("ok").toBool(), qPrintable(result.value("error").toString()));
 }
 
+// 为轻量文本和满页图像分别建立独立数据，不访问真实系统剪贴板。
+void WebSmokeTest::clipboardDeleteDialogStable_data()
+{
+    QTest::addColumn<bool>("images");
+    QTest::newRow("text") << false;
+    QTest::newRow("images") << true;
+}
+
+// 在 Windows 真实窗口中检查弹窗的绘制稳定性与鼠标点击调用链。
+void WebSmokeTest::clipboardDeleteDialogStable()
+{
+    QFETCH(bool, images);
+    // 常规离屏测试跳过原生合成专项，避免将平台差异当作产品回归。
+    if (QGuiApplication::platformName() != QStringLiteral("windows"))
+        QSKIP("原生弹窗合成回归需要 Windows 可见测试窗口。");
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    WebWindow window(directory.path(), false);
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window, 10000));
+    auto* view = window.webView();
+    auto* page = view->page();
+    auto* service = window.findChild<ClipboardService*>();
+    QVERIFY(service);
+    QVERIFY(service->setTypes(images ? QStringList{"image"} : QStringList{"text"}).value("ok").toBool());
+
+    // 所有记录直接注入独立服务，关闭 nativeIntegration 后没有系统剪贴板监听。
+    const auto addRecord = [service, images](int index) {
+        QMimeData fixture;
+        if (images) {
+            QImage picture(400, 240, QImage::Format_RGB32);
+            picture.fill(QColor::fromHsv((index * 31) % 360, 150, 220));
+            QPainter painter(&picture);
+            painter.fillRect(20 + index % 60, 30, 100, 130, QColor("#f8fafc"));
+            painter.setPen(QColor("#17233c"));
+            painter.drawText(picture.rect(), Qt::AlignCenter, QStringLiteral("独立缩略图 %1").arg(index));
+            painter.end();
+            fixture.setImageData(picture);
+        } else {
+            fixture.setText(QStringLiteral("独立删除确认回归记录 %1：测试期间保留此内容。").arg(index));
+        }
+        return service->capture(&fixture).value("ok").toBool();
+    };
+    const int originalCount = images ? 24 : 3;
+    for (int index = 0; index < originalCount; ++index)
+        QVERIFY(addRecord(index));
+    QTRY_VERIFY_WITH_TIMEOUT(evaluate(page, QStringLiteral(
+        "document.documentElement && document.documentElement.dataset.ready === 'true'")).toBool(), 20000);
+
+    // 用 DOM 只读取目标位置，实际操作由 Qt 原生鼠标事件发送给 WebEngine 渲染控件。
+    const auto nativeClick = [view, page](const QString& selector) {
+        const QString encoded = QString::fromUtf8(QJsonDocument(QJsonArray{selector}).toJson(QJsonDocument::Compact));
+        const auto position = evaluate(page, QStringLiteral(R"JS(
+            (() => {
+                const element = document.querySelector(%1[0]);
+                if (!element || element.disabled || element.hidden) return null;
+                element.scrollIntoView({block:'center', inline:'nearest'});
+                const r = element.getBoundingClientRect();
+                return {x:r.x+r.width/2, y:r.y+r.height/2, width:r.width, height:r.height};
+            })()
+        )JS").arg(encoded)).toMap();
+        if (position.isEmpty() || position.value("width").toDouble() <= 0)
+            return false;
+        QWidget* receiver = view->focusProxy() ? view->focusProxy() : view;
+        const QPoint point(qRound(position.value("x").toDouble()), qRound(position.value("y").toDouble()));
+        QTest::mouseClick(receiver, Qt::LeftButton, Qt::NoModifier, receiver->mapFrom(view, point));
+        return true;
+    };
+    QVERIFY(nativeClick(QStringLiteral("[data-page=clipboard]")));
+    QTRY_COMPARE_WITH_TIMEOUT(evaluate(page, QStringLiteral(
+        "document.querySelectorAll('.clipboard-card').length")).toInt(), originalCount, 10000);
+    if (images)
+        QTRY_VERIFY_WITH_TIMEOUT(evaluate(page, QStringLiteral(
+            "[...document.querySelectorAll('.clipboard-thumbnail')].filter(n=>n.complete&&n.naturalWidth>0).length >= 2")).toBool(), 10000);
+    QTest::qWait(300);
+
+    const QString captureRoot = qEnvironmentVariable("DESKTOPTOOL_DIALOG_DIAGNOSTICS");
+    const QString captureDirectory = captureRoot.isEmpty() ? QString() : QDir(captureRoot).filePath(images ? "images" : "text");
+    if (!captureDirectory.isEmpty())
+        QVERIFY(QDir().mkpath(captureDirectory));
+    // A/B 复现时仅用测试样式还原旧遮罩，不改变最终打包的产品资源。
+    if (qEnvironmentVariableIsSet("DESKTOPTOOL_DIALOG_OLD_BLUR")) {
+        QVERIFY(evaluate(page, QStringLiteral(
+            "const legacy=document.createElement('style'); legacy.textContent='.app-dialog::backdrop{backdrop-filter:blur(2px)}';"
+            "document.head.append(legacy); true")).toBool());
+    }
+    QVERIFY(nativeClick(QStringLiteral(".clipboard-card .button.danger")));
+    QTRY_VERIFY_WITH_TIMEOUT(evaluate(page, QStringLiteral(
+        "document.querySelector('#clipboard-dialog').open")).toBool(), 5000);
+
+    // 采样时保留多帧窗口图像，检查 DOM 静止但 GPU 合成闪烁的情况。
+    QJsonArray samples;
+    QImage previous;
+    int maximumChangedPixels = 0;
+    int injectedCount = 0;
+    bool allSamplesInteractive = true;
+    for (int index = 0; index < 40; ++index) {
+        if (index == 8 || index == 20 || index == 32) {
+            QVERIFY(addRecord(originalCount + injectedCount));
+            ++injectedCount;
+        }
+        QTest::qWait(90);
+        const auto state = evaluate(page, QStringLiteral(R"JS(
+            (() => {
+                const dialog=document.querySelector('#clipboard-dialog');
+                const button=document.querySelector('#clipboard-dialog-confirm');
+                const r=dialog.getBoundingClientRect(), b=button.getBoundingClientRect();
+                return {open:dialog.open, x:r.x, y:r.y, width:r.width, height:r.height,
+                    focus:document.activeElement?.id || document.activeElement?.tagName,
+                    hit:document.elementFromPoint(b.x+b.width/2,b.y+b.height/2)?.id,
+                    enabled:!button.disabled, backdrop:getComputedStyle(dialog,'::backdrop').backdropFilter,
+                    count:document.querySelectorAll('.clipboard-card').length};
+            })()
+        )JS")).toMap();
+        allSamplesInteractive = allSamplesInteractive && state.value("open").toBool()
+            && state.value("enabled").toBool() && state.value("hit").toString() == QStringLiteral("clipboard-dialog-confirm");
+        const QImage frame = window.grab().toImage().convertToFormat(QImage::Format_RGB32);
+        const QPoint topLeft = view->mapTo(&window, QPoint(qRound(state.value("x").toDouble()),
+            qRound(state.value("y").toDouble())));
+        const QRect dialogRect(topLeft, QSize(qRound(state.value("width").toDouble()), qRound(state.value("height").toDouble())));
+        const qreal scale = frame.devicePixelRatio();
+        const QImage crop = frame.copy(QRect(qRound(dialogRect.x() * scale), qRound(dialogRect.y() * scale),
+            qRound(dialogRect.width() * scale), qRound(dialogRect.height() * scale)));
+        int changedPixels = 0;
+        qint64 luminance = 0;
+        for (int row = 0; row < crop.height(); ++row) {
+            const auto* currentLine = reinterpret_cast<const QRgb*>(crop.constScanLine(row));
+            const auto* previousLine = previous.size() == crop.size()
+                ? reinterpret_cast<const QRgb*>(previous.constScanLine(row)) : nullptr;
+            for (int column = 0; column < crop.width(); ++column) {
+                luminance += qGray(currentLine[column]);
+                if (previousLine && currentLine[column] != previousLine[column])
+                    ++changedPixels;
+            }
+        }
+        maximumChangedPixels = qMax(maximumChangedPixels, changedPixels);
+        auto sample = QJsonObject::fromVariantMap(state);
+        sample.insert("index", index);
+        sample.insert("changedPixels", changedPixels);
+        sample.insert("averageLuminance", crop.isNull() ? 0.0 : double(luminance) / (crop.width() * crop.height()));
+        sample.insert("frameHash", QString::fromLatin1(QCryptographicHash::hash(
+            QByteArrayView(reinterpret_cast<const char*>(crop.constBits()), crop.sizeInBytes()), QCryptographicHash::Sha256).toHex()));
+        samples.append(sample);
+        previous = crop;
+        if (!captureDirectory.isEmpty())
+            QVERIFY(frame.save(QDir(captureDirectory).filePath(QStringLiteral("frame-%1.png").arg(index, 2, 10, QLatin1Char('0')))));
+    }
+    const auto summary = QJsonObject{{"images", images}, {"allSamplesInteractive", allSamplesInteractive},
+        {"maximumChangedPixels", maximumChangedPixels}, {"samples", samples}};
+    qInfo().noquote() << QStringLiteral("删除弹窗稳定性：%1，命中正常=%2，最大相邻帧变化像素=%3")
+        .arg(images ? QStringLiteral("24 张缩略图") : QStringLiteral("3 条文本"))
+        .arg(allSamplesInteractive).arg(maximumChangedPixels);
+    if (!captureDirectory.isEmpty()) {
+        QFile report(QDir(captureDirectory).filePath("samples.json"));
+        QVERIFY(report.open(QIODevice::WriteOnly));
+        QVERIFY(report.write(QJsonDocument(summary).toJson(QJsonDocument::Indented)) > 0);
+    }
+    QVERIFY2(allSamplesInteractive, "弹窗消失、按钮禁用或原生命中目标发生变化");
+    const int countBeforeCancel = originalCount + injectedCount;
+    QVERIFY(nativeClick(QStringLiteral("#clipboard-dialog-cancel")));
+    QTRY_VERIFY_WITH_TIMEOUT(!evaluate(page, QStringLiteral("document.querySelector('#clipboard-dialog').open")).toBool(), 5000);
+    QCOMPARE(service->snapshot().value("data").toMap().value("total").toInt(), countBeforeCancel);
+    QVERIFY(nativeClick(QStringLiteral(".clipboard-card .button.danger")));
+    QTRY_VERIFY(evaluate(page, QStringLiteral("document.querySelector('#clipboard-dialog').open")).toBool());
+    QVERIFY(nativeClick(QStringLiteral("#clipboard-dialog-confirm")));
+    QTRY_VERIFY_WITH_TIMEOUT(!evaluate(page, QStringLiteral("document.querySelector('#clipboard-dialog').open")).toBool(), 5000);
+    QCOMPARE(service->snapshot().value("data").toMap().value("total").toInt(), countBeforeCancel - 1);
+}
+
 void WebSmokeTest::damagedClipboardHistoryIsIsolated()
 {
     QTemporaryDir directory;
@@ -431,7 +887,7 @@ void WebSmokeTest::damagedClipboardHistoryIsIsolated()
     WebWindow window(directory.path(), false);
     window.show();
     auto* page = window.webView()->page();
-    QTRY_VERIFY_WITH_TIMEOUT(evaluate(page, QStringLiteral("document.documentElement.dataset.ready === 'true'")).toBool(), 20000);
+    QTRY_VERIFY_WITH_TIMEOUT(evaluate(page, QStringLiteral("document.documentElement && document.documentElement.dataset.ready === 'true'")).toBool(), 20000);
     QVERIFY(evaluate(page, QStringLiteral("!document.querySelector('#clipboard-error').hidden && document.querySelector('#clipboard-types').disabled && !document.querySelector('#workspace').inert")).toBool());
     QVERIFY(history.open(QIODevice::ReadOnly));
     QCOMPARE(history.readAll(), QByteArray("{broken"));
@@ -527,7 +983,7 @@ void WebSmokeTest::wallpaperThroughPage()
     window.resize(1400, 1000);
     window.show();
     auto* page = window.webView()->page();
-    QTRY_VERIFY_WITH_TIMEOUT(evaluate(page, QStringLiteral("document.documentElement.dataset.ready === 'true'")).toBool(), 20000);
+    QTRY_VERIFY_WITH_TIMEOUT(evaluate(page, QStringLiteral("document.documentElement && document.documentElement.dataset.ready === 'true'")).toBool(), 20000);
     auto* bridge = window.findChild<AppBridge*>();
     QVERIFY(bridge);
     const auto screens = bridge->getWallpaper().value("data").toMap().value("screens").toList();
@@ -597,7 +1053,7 @@ void WebSmokeTest::qrThroughPage()
     auto* page = window.webView()->page();
     auto* bridge = window.findChild<AppBridge*>();
     QVERIFY(bridge);
-    QTRY_VERIFY_WITH_TIMEOUT(evaluate(page, QStringLiteral("document.documentElement.dataset.ready === 'true'")).toBool(), 20000);
+    QTRY_VERIFY_WITH_TIMEOUT(evaluate(page, QStringLiteral("document.documentElement && document.documentElement.dataset.ready === 'true'")).toBool(), 20000);
     evaluate(page, QStringLiteral("document.querySelector('[data-page=qr]').click(); true"));
     QVERIFY(evaluate(page, QStringLiteral("!document.querySelector('#page-qr').hidden")).toBool());
     QVERIFY(evaluate(page, QStringLiteral("document.querySelector('#qr-decode').disabled")).toBool());
@@ -662,7 +1118,7 @@ void WebSmokeTest::screenshotsThroughPage()
     QVERIFY(bridge);
     auto* service = window.findChild<ScreenshotService*>();
     QVERIFY(service);
-    QTRY_VERIFY_WITH_TIMEOUT(evaluate(page, QStringLiteral("document.documentElement.dataset.ready === 'true'")).toBool(), 20000);
+    QTRY_VERIFY_WITH_TIMEOUT(evaluate(page, QStringLiteral("document.documentElement && document.documentElement.dataset.ready === 'true'")).toBool(), 20000);
     evaluate(page, QStringLiteral("document.querySelector('[data-page=screenshot]').click(); true"));
     QVERIFY(evaluate(page, QStringLiteral("!document.querySelector('#page-screenshot').hidden")).toBool());
 
@@ -677,7 +1133,8 @@ void WebSmokeTest::screenshotsThroughPage()
     painter.fillRect(80, 80, 200, 120, QColor("#f7d36d"));
     painter.end();
     const QString capturedAt = QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs);
-    QVERIFY(service->add(image, capturedAt).value("ok").toBool());
+    const auto added = service->add(image, capturedAt);
+    QVERIFY(added.value("ok").toBool());
     QTRY_COMPARE(evaluate(page, QStringLiteral("document.querySelectorAll('.screenshot-row').length")).toInt(), 1);
     QTRY_VERIFY(evaluate(page, QStringLiteral("document.querySelector('.screenshot-thumb').naturalWidth > 0")).toBool());
     QVERIFY(evaluate(page, QStringLiteral("document.querySelector('.screenshot-row-title').textContent.length > 0")).toBool());
@@ -686,12 +1143,19 @@ void WebSmokeTest::screenshotsThroughPage()
     evaluate(page, QStringLiteral("document.querySelector('.screenshot-row-actions .button').click(); true"));
     QTRY_COMPARE(QGuiApplication::clipboard()->image().size(), QSize(640, 400));
 
-    // 缩略图点击打开预览弹窗并显示原图。
-    evaluate(page, QStringLiteral("document.querySelector('.screenshot-thumb').click(); true"));
-    QTRY_VERIFY(evaluate(page, QStringLiteral("document.querySelector('#screenshot-dialog').open")).toBool());
-    QTRY_VERIFY(evaluate(page, QStringLiteral("document.querySelector('#screenshot-dialog-image').naturalWidth === 640")).toBool());
-    evaluate(page, QStringLiteral("document.querySelector('#screenshot-dialog-cancel').click(); true"));
-    QTRY_VERIFY(evaluate(page, QStringLiteral("!document.querySelector('#screenshot-dialog').open")).toBool());
+    // 历史截图交给独立 exe，不再在主进程创建图像窗口。
+    const auto launched = bridge->openScreenshotViewer(added.value("data").toMap().value("id").toString());
+    const auto launchedData = launched.value("data").toMap();
+    const qint64 toolPid = launchedData.value("pid").toLongLong();
+#ifdef Q_OS_WIN
+    // 仅结束本用例启动的子进程，防止后台工具占用临时截图文件。
+    if (toolPid > 0)
+        QProcess::execute(QStringLiteral("taskkill.exe"), {QStringLiteral("/PID"),
+            QString::number(toolPid), QStringLiteral("/F")});
+#endif
+    QVERIFY2(launched.value("ok").toBool(), qPrintable(launched.value("error").toString()));
+    QVERIFY(toolPid > 0);
+    QCOMPARE(launchedData.value("executable").toString(), MediaService::toolExecutablePath(false));
 
     // 删除记录后列表清空，清空入口随之禁用。
     const auto buttons = evaluate(page, QStringLiteral("document.querySelectorAll('.screenshot-row-actions .button').length")).toInt();
@@ -739,6 +1203,86 @@ void WebSmokeTest::screenshotsThroughPage()
         QStringLiteral("Ctrl+Shift+S"));
     QCOMPARE(bridge->getSettings().value("data").toMap().value("screenshotHotkeyKey").toInt(), 83);
     QCOMPARE(bridge->getSettings().value("data").toMap().value("screenshotHotkeyModifier").toInt(), 6);
+}
+
+void WebSmokeTest::fileSearchThroughPage()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QDir root(directory.filePath(QStringLiteral("资料")));
+    QVERIFY(root.mkpath(QStringLiteral("报表")));
+    QFile summary(root.filePath(QStringLiteral("报表/年度总结.docx")));
+    QVERIFY(summary.open(QIODevice::WriteOnly));
+    summary.write("a");
+    summary.close();
+    QFile note(root.filePath(QStringLiteral("说明.txt")));
+    QVERIFY(note.open(QIODevice::WriteOnly));
+    note.write("b");
+    note.close();
+    // 多于一页的数据验证追加渲染，不得重复加入上一页。
+    for (int i = 0; i < 250; ++i) {
+        QFile item(root.filePath(QStringLiteral("分页样本_%1.bin").arg(i)));
+        QVERIFY(item.open(QIODevice::WriteOnly));
+        item.write("x");
+    }
+    // 注入扫描根目录，使离屏环境的索引构建快速且确定；
+    // qputenv 按系统代码页写字节，含中文路径必须用 toLocal8Bit。
+    qputenv("DESKTOPTOOL_FILESEARCH_ROOTS", QDir::toNativeSeparators(root.absolutePath()).toLocal8Bit());
+    WebWindow window(directory.path(), false);
+    window.show();
+    auto* page = window.webView()->page();
+    QTRY_VERIFY_WITH_TIMEOUT(evaluate(page, QStringLiteral("document.documentElement && document.documentElement.dataset.ready === 'true'")).toBool(), 20000);
+    evaluate(page, QStringLiteral("document.querySelector('[data-page=filesearch]').click(); true"));
+    QVERIFY(evaluate(page, QStringLiteral("!document.querySelector('#page-filesearch').hidden")).toBool());
+    // 索引就绪后状态行显示扫描模式与文件计数。
+    QTRY_VERIFY_WITH_TIMEOUT(evaluate(page, QStringLiteral("document.querySelector('#filesearch-status').textContent.includes('索引就绪')")).toBool(), 30000);
+    QVERIFY(evaluate(page, QStringLiteral("document.querySelector('#filesearch-status').textContent.includes('252 个文件')")).toBool());
+    // 输入关键词触发检索，出现结果行。
+    evaluate(page, QStringLiteral(
+        "(() => { const input = document.querySelector('#filesearch-input');"
+        "input.value = '总结';"
+        "input.dispatchEvent(new Event('input', { bubbles: true })); })(); true"));
+    QTRY_COMPARE_WITH_TIMEOUT(evaluate(page, QStringLiteral("document.querySelectorAll('.filesearch-row').length")).toInt(), 1, 15000);
+    QVERIFY(evaluate(page, QStringLiteral("document.querySelector('.filesearch-row-path').textContent.includes('年度总结.docx')")).toBool());
+    QVERIFY(evaluate(page, QStringLiteral("document.querySelector('#filesearch-summary').textContent.includes('1 个结果')")).toBool());
+    // 扩展名过滤语法可用；直接等待新结果渲染，避免上一轮结果造成的计数竞态。
+    evaluate(page, QStringLiteral(
+        "(() => { const input = document.querySelector('#filesearch-input');"
+        "input.value = 'ext:txt';"
+        "input.dispatchEvent(new Event('input', { bubbles: true })); })(); true"));
+    QTRY_VERIFY_WITH_TIMEOUT(evaluate(page, QStringLiteral(
+        "document.querySelector('.filesearch-row-path') !== null"
+        " && document.querySelector('.filesearch-row-path').textContent.includes('说明.txt')")).toBool(), 15000);
+    QTRY_COMPARE(evaluate(page, QStringLiteral("document.querySelectorAll('.filesearch-row').length")).toInt(), 1);
+    // 无结果时显示明确提示。
+    evaluate(page, QStringLiteral(
+        "(() => { const input = document.querySelector('#filesearch-input');"
+        "input.value = 'zzz不存在zzz';"
+        "input.dispatchEvent(new Event('input', { bubbles: true })); })(); true"));
+    QTRY_VERIFY_WITH_TIMEOUT(evaluate(page, QStringLiteral(
+        "!document.querySelector('#filesearch-empty').hidden"
+        " && document.querySelector('#filesearch-empty h2').textContent.includes('没有匹配')")).toBool(), 15000);
+    QVERIFY(evaluate(page, QStringLiteral("document.querySelector('#filesearch-enable-service').hidden")).toBool());
+    evaluate(page, QStringLiteral(
+        "(() => { const input = document.querySelector('#filesearch-input');"
+        "input.value = '分页样本'; input.dispatchEvent(new Event('input', { bubbles: true })); })(); true"));
+    QTRY_COMPARE_WITH_TIMEOUT(evaluate(page, QStringLiteral("document.querySelectorAll('.filesearch-row').length")).toInt(), 200, 15000);
+    evaluate(page, QStringLiteral("document.querySelector('#filesearch-more').click(); true"));
+    QTRY_COMPARE_WITH_TIMEOUT(evaluate(page, QStringLiteral("document.querySelectorAll('.filesearch-row').length")).toInt(), 250, 15000);
+    QCOMPARE(evaluate(page, QStringLiteral("new Set(Array.from(document.querySelectorAll('.filesearch-row-path'), row => row.textContent)).size")).toInt(), 250);
+    const QString capturePath = qEnvironmentVariable("DESKTOPTOOL_TEST_CAPTURE");
+    if (!capturePath.isEmpty()) {
+        evaluate(page, QStringLiteral(
+            "(() => { const input = document.querySelector('#filesearch-input');"
+            "input.value = '总结';"
+            "input.dispatchEvent(new Event('input', { bubbles: true })); })(); true"));
+        QTRY_COMPARE_WITH_TIMEOUT(evaluate(page, QStringLiteral("document.querySelectorAll('.filesearch-row').length")).toInt(), 1, 15000);
+        window.resize(1180, 860);
+        QTest::qWait(400);
+        QVERIFY(window.grab().save(capturePath + QStringLiteral(".filesearch.png")));
+    }
+    // 环境变量只允许影响本用例，避免后续用例被强制启用。
+    qunsetenv("DESKTOPTOOL_FILESEARCH_ROOTS");
 }
 
 // 初始化测试用 Qt 应用；不会启用托盘、系统热键或单实例服务。

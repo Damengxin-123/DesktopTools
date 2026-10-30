@@ -1,0 +1,46 @@
+/* 地形编辑窗口：三栏布局（工具栏 / 三维视图 / 参数面板）与底部状态栏。 */
+:root{color-scheme:light;--accent:#315ee7;--accent-soft:#edf1ff;--ink:#202938;--muted:#7d8798;--line:#e7ebf1;--surface:#fff;--canvas:#f7f9fc;font-family:"Segoe UI","Microsoft YaHei",sans-serif;font-size:14px;color:var(--ink)}
+*{box-sizing:border-box}body{margin:0;overflow:hidden}button,input,select{font:inherit;outline:none}button{cursor:pointer}button:disabled{opacity:.45;cursor:not-allowed}button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid #a8baff;outline-offset:1px}[hidden]{display:none!important}
+#terrain-root{display:flex;width:100vw;height:100vh;background:var(--canvas)}
+#terrain-root:not([data-ready="true"]) #terrain-canvas{visibility:hidden}
+.terrain-tools{width:132px;flex:0 0 132px;background:#fff;border-right:1px solid var(--line);padding:14px 10px;display:flex;flex-direction:column;gap:14px;overflow:auto}
+.tool-group{display:flex;flex-direction:column;gap:6px}
+.tool-button{border:1px solid transparent;background:none;border-radius:9px;padding:9px 10px;text-align:left;display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;color:#5d6a80}
+.tool-button:hover{background:#f2f5fb}
+.tool-button.active{background:var(--accent-soft);color:var(--accent)}
+.tool-button.primary{background:var(--accent);color:#fff;justify-content:center}
+.tool-button.primary:hover{background:#244fd3}
+.tool-button.quiet{color:#8b96a8}
+.tool-icon{width:18px;text-align:center;font-size:15px}
+.tool-footnote{margin-top:auto;font-size:10px;line-height:2;color:#9aa4b5;padding:8px 6px;border-top:1px solid var(--line)}
+.terrain-center{flex:1;min-width:0;display:flex;flex-direction:column}
+.terrain-canvas-wrap{flex:1;min-height:0;position:relative;background:#9db8d2}
+#terrain-canvas{width:100%;height:100%;display:block;touch-action:none}
+.terrain-fatal{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:40px;background:#f5f7fa;font-size:14px;color:#a04a52;text-align:center;line-height:1.9}
+.terrain-status{display:flex;align-items:center;gap:18px;border-top:1px solid var(--line);background:#fff;padding:8px 16px;font-size:11px;color:#5f6b7e;flex:0 0 auto}
+.terrain-status .dirty{color:#bf9841;font-weight:600}
+.status-message{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#47536a}
+.terrain-params{width:296px;flex:0 0 296px;background:#fff;border-left:1px solid var(--line);overflow:auto;padding:18px 18px 30px;display:flex;flex-direction:column;gap:22px}
+.terrain-params h2{font-size:15px;margin:0 0 8px}
+.terrain-params section[data-tool-panel]{border-bottom:1px solid var(--line);padding-bottom:18px}
+.params-fixed{border-top:1px dashed var(--line);padding-top:16px}
+.param-hint{font-size:11px;color:#8d98ab;line-height:1.8;margin:6px 0 12px}
+.param-field{display:block;margin-bottom:12px}
+.param-field>span{display:block;font-size:11px;color:#68748a;margin-bottom:6px}
+.param-field input,.param-field select{width:100%;border:1px solid #dfe5ef;border-radius:7px;padding:8px 10px;background:#fff;font-size:13px;color:#4c5a72}
+.param-row{display:flex;gap:8px}
+.param-row input{flex:1;min-width:0}
+.param-row input[readonly]{background:#f6f8fc;color:#8d98ab}
+.param-preview{font-size:11px;color:#4d6b46;background:#f2f8ee;border:1px solid #dfead8;border-radius:7px;padding:9px 11px;line-height:1.8;margin:4px 0 0}
+.param-check{display:flex;align-items:flex-start;gap:8px;font-size:12px;color:#5d6a80;margin-bottom:12px;cursor:pointer}
+.param-check input{accent-color:var(--accent);width:15px;height:15px;flex-shrink:0;margin:1px 0 0;cursor:pointer}
+.button{display:inline-flex;align-items:center;justify-content:center;border:1px solid transparent;border-radius:8px;padding:9px 14px;font-size:12px;font-weight:600}
+.button.primary{background:var(--accent);color:#fff}
+.button.primary:hover{background:#244fd3}
+.button.secondary{background:#fff;border-color:#dfe5ee;color:#576278}
+.button.secondary:hover{background:#f2f5fb}
+.button.small{padding:7px 11px}
+.terrain-dialog{border:1px solid var(--line);border-radius:13px;padding:22px 26px;width:460px;max-width:calc(100vw - 40px);box-shadow:0 18px 70px #1d2e532a}
+.terrain-dialog::backdrop{background:#17233c55}
+.terrain-dialog h2{margin:0 0 12px;font-size:18px}
+.dialog-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:18px}

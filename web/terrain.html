@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' qrc:; style-src 'self' 'unsafe-inline'; img-src data: qrc:; font-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>地形编辑</title>
+  <link rel="stylesheet" href="terrain.css">
+  <script defer src="i18n-en.js"></script>
+  <script defer src="i18n.js"></script>
+  <script defer src="qrc:///qtwebchannel/qwebchannel.js"></script>
+  <script defer src="dist/terrain-editor.js"></script>
+</head>
+<body>
+  <div id="terrain-root">
+    <aside class="terrain-tools" aria-label="地形工具栏">
+      <div class="tool-group">
+        <button type="button" id="tool-detail" data-tool-button="detail" class="tool-button"><span class="tool-icon" aria-hidden="true">▲</span>细节画笔</button>
+        <button type="button" id="tool-adjust" data-tool-button="adjust" class="tool-button"><span class="tool-icon" aria-hidden="true">≈</span>调整画笔</button>
+        <button type="button" id="tool-mountain" data-tool-button="mountain" class="tool-button"><span class="tool-icon" aria-hidden="true">⛰</span>山画笔</button>
+        <button type="button" id="tool-river" data-tool-button="river" class="tool-button"><span class="tool-icon" aria-hidden="true">≈</span>河流画笔</button>
+        <button type="button" id="tool-road" data-tool-button="road" class="tool-button"><span class="tool-icon" aria-hidden="true">▤</span>道路画笔</button>
+        <button type="button" id="tool-lake" data-tool-button="lake" class="tool-button"><span class="tool-icon" aria-hidden="true">◍</span>湖泊画笔</button>
+        <button type="button" id="tool-coast" data-tool-button="coast" class="tool-button"><span class="tool-icon" aria-hidden="true">☀</span>海岸画笔</button>
+      </div>
+      <div class="tool-group">
+        <button type="button" id="action-export" class="tool-button">⤓ 导出</button>
+        <button type="button" id="action-settings" class="tool-button">⚙ 设置</button>
+      </div>
+      <div class="tool-group">
+        <button type="button" id="action-undo" class="tool-button">↶ 撤销</button>
+        <button type="button" id="action-redo" class="tool-button">↷ 重做</button>
+        <button type="button" id="action-save" class="tool-button primary">保存</button>
+        <button type="button" id="action-close" class="tool-button quiet">关闭窗口</button>
+      </div>
+      <div class="tool-footnote">左键绘制 · Alt 降低<br>右键旋转 · 中键平移<br>滚轮缩放 · [ ] 画笔大小<br>Ctrl+Z 撤销 · Ctrl+S 保存</div>
+    </aside>
+
+    <main class="terrain-center">
+      <div class="terrain-canvas-wrap">
+        <canvas id="terrain-canvas"></canvas>
+        <div id="terrain-fatal" class="terrain-fatal" role="alert" hidden></div>
+      </div>
+      <footer class="terrain-status">
+        <span id="status-dirty" role="status">已保存</span>
+        <span id="status-size">—</span>
+        <span id="status-spacing">—</span>
+        <span id="status-grid">—</span>
+        <span id="status-message" class="status-message"></span>
+      </footer>
+    </main>
+
+    <aside class="terrain-params" aria-label="工具参数">
+      <section data-tool-panel="detail" hidden>
+        <h2>细节画笔</h2>
+        <p class="param-hint">局部抬高或降低地形。未按 Alt 抬高，按住 Alt 降低。</p>
+        <label class="param-field"><span>画笔大小（米，直径）</span><input id="detail-size" type="number" min="2" max="600" step="1" value="20"></label>
+        <label class="param-field"><span>画笔力度（米/秒）</span><input id="detail-strength" type="number" min="1" max="200" step="1" value="24"></label>
+      </section>
+      <section data-tool-panel="adjust" hidden>
+        <h2>调整画笔</h2>
+        <p class="param-hint">平滑：减少高度突变；平整：整笔划逐渐调整到落笔时的高度；锐化：增强已有起伏（限幅）。</p>
+        <label class="param-field"><span>模式</span><select id="adjust-mode"><option value="smooth">平滑</option><option value="flatten">平整</option><option value="sharpen">锐化</option></select></label>
+        <label class="param-field"><span>画笔大小（米，直径）</span><input id="adjust-size" type="number" min="2" max="600" step="1" value="24"></label>
+        <label class="param-field"><span>画笔力度</span><input id="adjust-strength" type="number" min="0.05" max="2" step="0.05" value="0.6"></label>
+      </section>
+      <section data-tool-panel="mountain" hidden>
+        <h2>山画笔</h2>
+        <p class="param-hint">在绘制范围内逐渐形成所选类型的山地；山脊方向跟随绘制方向。</p>
+        <label class="param-field"><span>山体类型</span><select id="mountain-type"><option value="hill">圆润丘陵</option><option value="peak">尖峰山地</option><option value="ridge">山脊</option><option value="mesa">台地</option></select></label>
+        <label class="param-field"><span>画笔大小（米，直径）</span><input id="mountain-size" type="number" min="4" max="600" step="1" value="60"></label>
+        <label class="param-field"><span>画笔力度</span><input id="mountain-strength" type="number" min="0.05" max="1" step="0.05" value="0.7"></label>
+      </section>
+      <section data-tool-panel="river" hidden>
+        <h2>河流画笔</h2>
+        <p class="param-hint">拖动生成河床与河岸；河深相对本次笔划开始前的地面计算，重叠不会越挖越深。</p>
+        <label class="param-field"><span>河流宽度（米）</span><input id="river-width" type="number" min="2" max="200" step="1" value="12"></label>
+        <label class="param-field"><span>河流深度（米）</span><input id="river-depth" type="number" min="0.5" max="200" step="0.5" value="4"></label>
+        <label class="param-field"><span>地层类型</span><select id="river-stratum"><option value="soft">松软土层（岸坡宽缓）</option><option value="normal" selected>普通土层</option><option value="hard">坚硬岩层（岸坡较陡）</option></select></label>
+      </section>
+      <section data-tool-panel="road" hidden>
+        <h2>道路画笔</h2>
+        <p class="param-hint">路面横向保持水平，纵向随原地形平滑变化；不生成桥梁、隧道或垂直面。</p>
+        <label class="param-field"><span>道路宽度（米）</span><input id="road-width" type="number" min="2" max="200" step="1" value="8"></label>
+        <label class="param-field"><span>路基模式</span><select id="road-bed"><option value="gentle">平缓路基（宽缓边坡）</option><option value="steep">陡直路基（窄陡边坡）</option></select></label>
+      </section>
+      <section data-tool-panel="lake" hidden>
+        <h2>湖泊画笔</h2>
+        <p class="param-hint">拖动形成连续湖盆与岸坡；深度相对笔划开始前的地面计算，盆底柔和。</p>
+        <label class="param-field"><span>画笔大小（米，湖盆范围）</span><input id="lake-size" type="number" min="4" max="1200" step="1" value="60"></label>
+        <label class="param-field"><span>湖泊深度（米）</span><input id="lake-depth" type="number" min="0.5" max="300" step="0.5" value="6"></label>
+        <label class="param-field"><span>地层类型</span><select id="lake-stratum"><option value="soft">松软土层（岸坡宽缓）</option><option value="normal" selected>普通土层</option><option value="hard">坚硬岩层（岸坡较陡）</option></select></label>
+      </section>
+      <section data-tool-panel="coast" hidden>
+        <h2>海岸画笔</h2>
+        <p class="param-hint">以海平面为参考重塑岸坡；半透明平面仅为海平面预览，不写入地形数据。勾选“显示海平面”后，切换到其他画笔仍会持续显示。</p>
+        <label class="param-field"><span>画笔大小（米，直径）</span><input id="coast-size" type="number" min="8" max="1200" step="1" value="80"></label>
+        <label class="param-field"><span>画笔力度</span><input id="coast-strength" type="number" min="0.05" max="1" step="0.05" value="0.7"></label>
+        <label class="param-field"><span>海平面高度（米）</span><input id="coast-sea-level" type="number" min="-1000" max="1000" step="0.5" value="0"></label>
+        <label class="param-field"><span>海岸类型</span><select id="coast-type"><option value="sand">沙质缓岸</option><option value="dirt">土质斜岸</option><option value="rock">岩质陡岸</option></select></label>
+        <label class="param-check"><input id="coast-show-sea-level" type="checkbox"><span>显示海平面（切换到其他画笔后保持显示）</span></label>
+      </section>
+
+      <section class="params-fixed">
+        <h2>导出 16 位灰度高度图</h2>
+        <p class="param-hint">黑色为最低、白色为最高；同时输出同名 JSON 说明文件。导出不改变工程数据。</p>
+        <label class="param-field"><span>导出采样间距（米，≥ 编辑间距）</span><input id="export-spacing" type="number" min="0.1" max="100" step="0.1" value="2"></label>
+        <p id="export-preview" class="param-preview">—</p>
+        <p class="param-hint">UE Landscape 需要特定分辨率（如 505、1009、2017）；说明文件中会给出建议。</p>
+      </section>
+
+      <section class="params-fixed">
+        <h2>设置</h2>
+        <label class="param-field"><span>编辑采样间距（米）</span>
+          <div class="param-row"><input id="resample-current" type="text" readonly value="—"><button type="button" id="action-resample" class="button secondary small">调整…</button></div>
+        </label>
+        <label class="param-field"><span>撤销步数（1–200，默认 30）</span>
+          <div class="param-row"><input id="undo-steps" type="number" min="1" max="200" step="1" value="30"><button type="button" id="action-undo-steps" class="button secondary small">应用</button></div>
+        </label>
+        <p id="undo-memory" class="param-preview">—</p>
+      </section>
+    </aside>
+  </div>
+
+  <dialog id="resample-dialog" class="terrain-dialog">
+    <form method="dialog" onsubmit="return false">
+      <h2>调整编辑采样间距</h2>
+      <p class="param-hint">这将执行一次重采样：实际尺寸保持米制含义，网格分辨率随之变化；成功后撤销历史将被清空，请先保存当前修改。</p>
+      <label class="param-field"><span>新的采样间距（米）</span><input id="resample-spacing" type="number" min="0.1" max="100" step="0.1" value="2"></label>
+      <p id="resample-preview" class="param-preview">—</p>
+      <div class="dialog-actions">
+        <button type="button" id="resample-cancel" class="button secondary">取消</button>
+        <button type="button" id="resample-confirm" class="button primary">开始重采样</button>
+      </div>
+    </form>
+  </dialog>
+</body>
+</html>

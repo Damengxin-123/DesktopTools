@@ -1,7 +1,11 @@
 <RCC>
   <qresource prefix="/web">
+    <file alias="i18n-en.json">../web/i18n-en.json</file>
+    <file alias="i18n-en.js">../web/i18n-en.js</file>
+    <file alias="i18n.js">../web/i18n.js</file>
     <file alias="index.html">../web/index.html</file>
     <file alias="styles.css">../web/styles.css</file>
+    <file alias="navigation.css">../web/navigation.css</file>
     <file alias="bridge.js">../web/bridge.js</file>
     <file alias="downloads.js">../web/downloads.js</file>
     <file alias="clipboard.js">../web/clipboard.js</file>
@@ -10,9 +14,23 @@
     <file alias="wallpaper.js">../web/wallpaper.js</file>
     <file alias="wallpaper-layout.js">../web/wallpaper-layout.js</file>
     <file alias="gridmap.js">../web/gridmap.js</file>
+    <file alias="terrain.html">../web/terrain.html</file>
+    <file alias="terrain.css">../web/terrain.css</file>
+    <file alias="dist/terrain-editor.js">../web/dist/terrain-editor.js</file>
+    <file alias="dist/terrain-page.js">../web/dist/terrain-page.js</file>
     <file alias="qr.js">../web/qr.js</file>
     <file alias="screenshot.js">../web/screenshot.js</file>
+    <file alias="recording.js">../web/recording.js</file>
+    <file alias="browser.js">../web/browser.js</file>
+    <file alias="filesearch.js">../web/filesearch.js</file>
+    <file alias="bookmarks.html">../web/bookmarks.html</file>
+    <file alias="bookmark-panel.js">../web/bookmark-panel.js</file>
+    <file alias="bookmark-panel.css">../web/bookmark-panel.css</file>
+    <file alias="icons.js">../web/icons.js</file>
+    <file alias="navigation.js">../web/navigation.js</file>
+    <file alias="bookmark-host.js">../web/bookmark-host.js</file>
     <file alias="app.js">../web/app.js</file>
+    <file alias="level-layout.js">../web/level-layout.js</file>
   </qresource>
   <qresource prefix="/images">
     <file alias="app_icon.ico">images/app_icon.ico</file>

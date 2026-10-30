@@ -94,7 +94,9 @@ try {
     }
     Assert-PackageTree $payloadDirectory
     # HTML、CSS、JavaScript 和应用图标已编译进 exe；以下是必须随附的外部资源。
-    $requiredFiles = @('DesktopTool.exe', 'Qt6Core.dll', 'Qt6Gui.dll', 'Qt6Widgets.dll',
+    $requiredFiles = @('tools\DesktopToolImageBrowser.exe', 'tools\DesktopToolVideoPlayer.exe',
+        'tools\Qt6Core.dll', 'tools\Qt6Widgets.dll', 'tools\Qt6Multimedia.dll', 'tools\plugins\platforms\qwindows.dll', 'tools\qt.conf',
+        'DesktopTool.exe', 'DesktopToolLevelEditor.exe', 'DesktopToolIndexService.exe', 'Qt6Core.dll', 'Qt6Gui.dll', 'Qt6Widgets.dll',
         'Qt6Network.dll', 'Qt6WebChannel.dll', 'Qt6WebEngineCore.dll', 'Qt6WebEngineWidgets.dll',
         'QtWebEngineProcess.exe', 'plugins\platforms\qwindows.dll', 'resources\icudtl.dat',
         'resources\qtwebengine_resources.pak', 'resources\qtwebengine_resources_100p.pak',
@@ -109,6 +111,30 @@ try {
         @(Get-ChildItem -LiteralPath $localeDirectory -Filter '*.pak' -File).Count -eq 0) {
         throw '缺少 WebEngine 语言资源，已停止打包。'
     }
+    # 注入安装器：卸载脚本随程序目录部署，安装脚本放压缩包根目录。
+    # 模板中的占位符在打包时替换为实际版本号与程序目录名。
+    $installerTemplate = Join-Path $PSScriptRoot 'installer-template.bat'
+    $uninstallerTemplate = Join-Path $PSScriptRoot 'uninstaller-template.bat'
+    foreach ($template in @($installerTemplate, $uninstallerTemplate)) {
+        if (-not (Test-Path -LiteralPath $template -PathType Leaf)) {
+            throw "缺少安装器模板：$template"
+        }
+    }
+    $utf8NoBom = New-Object Text.UTF8Encoding($false)
+    # cmd 按 ANSI 代码页逐行解析批处理；UTF-8 中文会被误切分出杂散命令。
+    # 模板以 UTF-8 入库，打包时统一转成 GBK（代码页 936）+ CRLF 再生成脚本。
+    $gbk = [Text.Encoding]::GetEncoding(936)
+    function Convert-BatchScript([string]$SourceText) {
+        $prepared = $SourceText.Replace("chcp 65001", "chcp 936").Replace("`r`n", "`n")
+        return ($prepared -replace "`n", "`r`n")
+    }
+    $uninstallerSource = [IO.File]::ReadAllText($uninstallerTemplate, $utf8NoBom)
+    [IO.File]::WriteAllText((Join-Path $payloadDirectory 'uninstall.bat'),
+        (Convert-BatchScript $uninstallerSource), $gbk)
+    $installerSource = [IO.File]::ReadAllText($installerTemplate, $utf8NoBom)
+    $installerScript = Convert-BatchScript($installerSource.Replace('@VERSION@', $version).Replace('@PAYLOAD_DIR@', $packageName))
+    $installScriptPath = Join-Path $stagingDirectory 'install.bat'
+    [IO.File]::WriteAllText($installScriptPath, $installerScript, $gbk)
     $fileCount = @(Get-ChildItem -LiteralPath $payloadDirectory -File -Recurse -Force).Count
     $zipName = $packageName + '-' + (Get-Date -Format 'yyyyMMdd-HHmmss-fff') + '.zip'
     $zipPath = Join-Path $outputPath $zipName
@@ -116,7 +142,13 @@ try {
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     Write-Host "正在压缩 $fileCount 个程序与资源文件…"
     # 使用 .NET ZIP API，保留所有部署文件，支持 ZIP64，不依赖第三方压缩程序。
-    [IO.Compression.ZipFile]::CreateFromDirectory($payloadDirectory, $temporaryZip, [IO.Compression.CompressionLevel]::Optimal, $true)
+    # 压缩包根目录 = 程序目录 + install.bat：解压后运行 install.bat 即为安装，
+    # 直接使用程序目录则为便携模式。
+    $zipSourceDirectory = Join-Path $stagingDirectory 'zipsrc'
+    [IO.Directory]::CreateDirectory($zipSourceDirectory) | Out-Null
+    Move-Item -LiteralPath $payloadDirectory -Destination (Join-Path $zipSourceDirectory $packageName)
+    Copy-Item -LiteralPath $installScriptPath -Destination (Join-Path $zipSourceDirectory 'install.bat')
+    [IO.Compression.ZipFile]::CreateFromDirectory($zipSourceDirectory, $temporaryZip, [IO.Compression.CompressionLevel]::Optimal, $false)
     # 直接使用系统 .NET 计算校验值，兼容未加载 Get-FileHash 模块的 PowerShell 环境。
     $hashAlgorithm = [Security.Cryptography.SHA256]::Create()
     $zipStream = [IO.File]::OpenRead($temporaryZip)
@@ -131,6 +163,7 @@ try {
     [IO.File]::WriteAllText(($zipPath + '.sha256'), "$checksum *$zipName" + [Environment]::NewLine, (New-Object Text.UTF8Encoding($false)))
     Write-Host "打包完成：$zipPath"
     Write-Host ('压缩包大小：{0:N1} MB；未包含本地用户数据。' -f ((Get-Item -LiteralPath $zipPath).Length / 1MB))
+    Write-Host '安装方式：解压后运行 install.bat，按提示输入安装位置（会在其中创建 DesktopTool 子目录）。'
     Write-Host "SHA-256：$checksum"
 } catch {
     [Console]::Error.WriteLine('打包失败：' + $_.Exception.Message)

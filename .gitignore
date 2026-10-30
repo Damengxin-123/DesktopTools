@@ -376,3 +376,10 @@ cmake_install.cmake
 install_manifest.txt
 CTestTestfile.cmake
 Testing/
+
+# 独立媒体工具及其本地部署运行库。
+/tools/
+
+# 本地助手记录与仅适用于本机路径的开发安装脚本。
+/.workbuddy/
+/pack/install.bat

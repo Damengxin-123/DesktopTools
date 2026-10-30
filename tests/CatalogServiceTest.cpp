@@ -252,7 +252,13 @@ bool settingsCompatibility()
     REQUIRE(ok(service.save({{QStringLiteral("screenshotEnabled"), false}})));
     REQUIRE(!resultData(service.snapshot()).value(QStringLiteral("screenshotEnabled")).toBool());
     REQUIRE(ok(service.save({{QStringLiteral("screenshotEnabled"), true}})));
+    REQUIRE(resultData(service.snapshot()).value(QStringLiteral("language")).toString() == QStringLiteral("zh-CN"));
+    REQUIRE(ok(service.save({{QStringLiteral("language"), QStringLiteral("en")}})));
+    const QByteArray beforeLanguageFailure = readFile(path);
+    REQUIRE(!ok(service.save({{QStringLiteral("language"), QStringLiteral("xx")}})));
+    REQUIRE(readFile(path) == beforeLanguageFailure);
     SettingsService reopened(directory.path());
+    REQUIRE(resultData(reopened.snapshot()).value(QStringLiteral("language")).toString() == QStringLiteral("en"));
     REQUIRE(reopened.snapshot() == service.snapshot());
     REQUIRE(!ok(SettingsService::validate({{QStringLiteral("fontSize"), 16}})));
     REQUIRE(writeFile(path, QByteArray("{broken")));
@@ -271,6 +277,9 @@ bool settingsCompatibility()
 // 使用隔离存储验证自启增删、路径引用、系统状态回读和保存失败保护。
 bool autoStartSettings()
 {
+    // 默认安装目录直接启动即可读取原 data，不把数据目录参数写入自启项。
+    REQUIRE(SettingsService::startupCommand(QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("data")))
+        == QStringLiteral("\"%1\"").arg(QDir::toNativeSeparators(QCoreApplication::applicationFilePath())));
     QTemporaryDir directory;
     REQUIRE(directory.isValid());
     const QString root = directory.filePath(QStringLiteral("中文 数据"));

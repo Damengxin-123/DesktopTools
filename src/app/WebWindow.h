@@ -20,6 +20,8 @@ public:
     void activate();
     // 询问网页是否存在未保存内容，确认后退出。
     void requestQuit();
+    // 命令行或第二实例转发的本地文件：交给桥接层分流打开。
+    void openLocalFile(const QString& path);
 protected:
     // 有托盘时关闭按钮隐藏窗口，否则执行退出保护。
     void closeEvent(QCloseEvent* event) override;

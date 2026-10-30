@@ -6,6 +6,8 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonDocument>
+#include <QJsonArray>
+#include <QSet>
 #include <QJsonParseError>
 #include <QSaveFile>
 #include <QSettings>
@@ -78,9 +80,7 @@ SettingsService::SettingsService(const QString& dataRoot, QObject* parent, QSett
     : QObject(parent)
     , m_path(QDir(dataRoot).filePath(QStringLiteral("setting/system_config.json")))
     , m_startupSettings(startupSettings)
-    // 数据目录使用正斜杠，避免盘符根目录末尾的反斜杠转义结束引号。
-    , m_startupCommand(QStringLiteral("\"%1\" --data-dir \"%2\"")
-          .arg(QDir::toNativeSeparators(QCoreApplication::applicationFilePath()), QDir(dataRoot).absolutePath()))
+    , m_startupCommand(startupCommand(dataRoot))
 {
     QFile file(m_path);
     if (!file.exists())
@@ -104,12 +104,34 @@ SettingsService::SettingsService(const QString& dataRoot, QObject* parent, QSett
         m_loadError = QStringLiteral("设置文件内容无效，已禁止覆盖：%1").arg(result.value(QStringLiteral("error")).toString());
 }
 
+QString SettingsService::startupCommand(const QString& dataRoot)
+{
+    QString command = QStringLiteral("\"%1\"")
+        .arg(QDir::toNativeSeparators(QCoreApplication::applicationFilePath()));
+    const QString absoluteData = QDir(dataRoot).absolutePath();
+    const QString defaultData = QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("data"));
+#ifdef Q_OS_WIN
+    const bool defaultLocation = absoluteData.compare(defaultData, Qt::CaseInsensitive) == 0;
+#else
+    const bool defaultLocation = absoluteData == defaultData;
+#endif
+    // 数据目录使用正斜杠，避免盘符根目录末尾的反斜杠转义结束引号。
+    if (!defaultLocation)
+        command += QStringLiteral(" --data-dir \"%1\"").arg(absoluteData);
+    return command;
+}
+
 QVariantMap SettingsService::data() const
 {
     // 原生模式以系统自启项为准，允许用户从系统中删除后重新启用。
     if (m_startupSettings)
         m_startupSettings->sync();
     return {
+        {QStringLiteral("language"), m_document.value(QStringLiteral("language")).toVariant().isValid()
+             ? m_document.value(QStringLiteral("language")).toVariant() : QVariant(QStringLiteral("zh-CN"))},
+        {QStringLiteral("sidebarCollapsed"), m_document.value(QStringLiteral("sidebar_collapsed")).toVariant().isValid()
+             ? m_document.value(QStringLiteral("sidebar_collapsed")).toVariant() : QVariant(false)},
+        {QStringLiteral("navigationItems"), m_document.value(QStringLiteral("navigation_items")).toArray().toVariantList()},
         {QStringLiteral("autoStart"), m_startupSettings
              ? QVariant(!m_startupSettings->value(QStringLiteral("DesktopTool")).toString().isEmpty())
              : m_document.contains(QStringLiteral("auto_start"))
@@ -126,6 +148,12 @@ QVariantMap SettingsService::data() const
              ? m_document.value(QStringLiteral("screenshot_hotkey_key")).toVariant() : QVariant(0x41)},
         {QStringLiteral("screenshotEnabled"), m_document.contains(QStringLiteral("screenshot_enabled"))
              ? m_document.value(QStringLiteral("screenshot_enabled")).toVariant() : QVariant(true)},
+        {QStringLiteral("recordingAudioEnabled"), m_document.contains(QStringLiteral("recording_audio_enabled"))
+             ? m_document.value(QStringLiteral("recording_audio_enabled")).toVariant() : QVariant(false)},
+        {QStringLiteral("recordingAudioMicrophone"), m_document.contains(QStringLiteral("recording_audio_microphone"))
+             ? m_document.value(QStringLiteral("recording_audio_microphone")).toVariant() : QVariant(true)},
+        {QStringLiteral("recordingAudioSystem"), m_document.contains(QStringLiteral("recording_audio_system"))
+             ? m_document.value(QStringLiteral("recording_audio_system")).toVariant() : QVariant(true)},
         {QStringLiteral("downloadDirectory"), m_document.contains(QStringLiteral("download_directory"))
              ? m_document.value(QStringLiteral("download_directory")).toVariant() : QVariant(defaultDownloadDirectory())}
     };
@@ -138,12 +166,38 @@ QVariantMap SettingsService::validate(const QVariantMap& settings)
 
 QVariantMap SettingsService::validateValues(const QVariantMap& settings, bool checkDirectory)
 {
+    // 语言仅接受已提供翻译的值；旧配置默认中文。
+    const QString language = settings.value(QStringLiteral("language"), QStringLiteral("zh-CN")).toString();
+    if (language != QStringLiteral("zh-CN") && language != QStringLiteral("en"))
+        return ServiceResult::failure(QStringLiteral("不支持的界面语言。"));
+    // 导航配置允许旧版本缺省，但拒绝重复标识和非法开关值。
+    if (settings.contains(QStringLiteral("sidebarCollapsed"))
+        && !QJsonValue::fromVariant(settings.value(QStringLiteral("sidebarCollapsed"))).isBool())
+        return ServiceResult::failure(QStringLiteral("侧栏折叠状态必须为布尔值。"));
+    const QJsonValue navigation = QJsonValue::fromVariant(settings.value(QStringLiteral("navigationItems"), QVariantList{}));
+    if (!navigation.isArray() || navigation.toArray().size() > 100)
+        return ServiceResult::failure(QStringLiteral("功能列表配置格式不正确。"));
+    QSet<QString> identifiers; // 检查功能标识唯一性，并保留后续版本的未知功能配置。
+    for (const auto& value : navigation.toArray()) {
+        const QJsonObject item = value.toObject();
+        const QString id = item.value(QStringLiteral("id")).toString();
+        if (!value.isObject() || id.isEmpty() || id.size() > 64 || id == QStringLiteral("settings")
+            || identifiers.contains(id) || !item.value(QStringLiteral("visible")).isBool())
+            return ServiceResult::failure(QStringLiteral("功能列表包含重复标识或无效显示状态。"));
+        identifiers.insert(id);
+    }
     if (settings.contains(QStringLiteral("autoStart"))
         && !QJsonValue::fromVariant(settings.value(QStringLiteral("autoStart"))).isBool())
         return ServiceResult::failure(QStringLiteral("开机自启必须为勾选或未勾选状态。"));
     if (settings.contains(QStringLiteral("screenshotEnabled"))
         && !QJsonValue::fromVariant(settings.value(QStringLiteral("screenshotEnabled"))).isBool())
         return ServiceResult::failure(QStringLiteral("截图功能开关必须为勾选或未勾选状态。"));
+    for (const QString& key : {QStringLiteral("recordingAudioEnabled"),
+             QStringLiteral("recordingAudioMicrophone"), QStringLiteral("recordingAudioSystem")}) {
+        if (settings.contains(key)
+            && !QJsonValue::fromVariant(settings.value(key)).isBool())
+            return ServiceResult::failure(QStringLiteral("录屏音频选项必须为勾选或未勾选状态。"));
+    }
     if (!integerValue(settings.value(QStringLiteral("fontSize")), 8, 32))
         return ServiceResult::failure(QStringLiteral("字体大小必须为 8 至 32 的整数。"));
     if (!integerValue(settings.value(QStringLiteral("hotkeyModifier")), 0, 15))
@@ -161,12 +215,17 @@ QVariantMap SettingsService::validateValues(const QVariantMap& settings, bool ch
         return ServiceResult::failure(QStringLiteral("截图热键不能只包含 Ctrl、Alt、Shift 或 Win 修饰键。"));
     for (auto iterator = settings.cbegin(); iterator != settings.cend(); ++iterator)
     {
-        if (iterator.key() != QStringLiteral("fontSize") && iterator.key() != QStringLiteral("hotkeyModifier")
+        if (iterator.key() != QStringLiteral("language") && iterator.key() != QStringLiteral("fontSize") && iterator.key() != QStringLiteral("hotkeyModifier")
             && iterator.key() != QStringLiteral("hotkeyKey") && iterator.key() != QStringLiteral("downloadDirectory")
+            && iterator.key() != QStringLiteral("sidebarCollapsed")
+            && iterator.key() != QStringLiteral("navigationItems")
             && iterator.key() != QStringLiteral("autoStart")
             && iterator.key() != QStringLiteral("screenshotHotkeyModifier")
             && iterator.key() != QStringLiteral("screenshotHotkeyKey")
-            && iterator.key() != QStringLiteral("screenshotEnabled"))
+            && iterator.key() != QStringLiteral("screenshotEnabled")
+            && iterator.key() != QStringLiteral("recordingAudioEnabled")
+            && iterator.key() != QStringLiteral("recordingAudioMicrophone")
+            && iterator.key() != QStringLiteral("recordingAudioSystem"))
             return ServiceResult::failure(QStringLiteral("未知的设置字段：%1").arg(iterator.key()));
     }
     if (settings.contains(QStringLiteral("downloadDirectory"))
@@ -185,6 +244,9 @@ QVariantMap SettingsService::validateValues(const QVariantMap& settings, bool ch
             return ServiceResult::failure(directoryError);
     }
     return ServiceResult::success(QVariantMap{
+        {QStringLiteral("language"), language},
+        {QStringLiteral("sidebarCollapsed"), settings.value(QStringLiteral("sidebarCollapsed"), false).toBool()},
+        {QStringLiteral("navigationItems"), navigation.toArray().toVariantList()},
         {QStringLiteral("autoStart"), settings.value(QStringLiteral("autoStart"), false).toBool()},
         {QStringLiteral("fontSize"), settings.value(QStringLiteral("fontSize")).toInt()},
         {QStringLiteral("hotkeyModifier"), settings.value(QStringLiteral("hotkeyModifier")).toInt()},
@@ -192,6 +254,9 @@ QVariantMap SettingsService::validateValues(const QVariantMap& settings, bool ch
         {QStringLiteral("screenshotHotkeyModifier"), settings.value(QStringLiteral("screenshotHotkeyModifier")).toInt()},
         {QStringLiteral("screenshotHotkeyKey"), settings.value(QStringLiteral("screenshotHotkeyKey")).toInt()},
         {QStringLiteral("screenshotEnabled"), settings.value(QStringLiteral("screenshotEnabled"), true).toBool()},
+        {QStringLiteral("recordingAudioEnabled"), settings.value(QStringLiteral("recordingAudioEnabled"), false).toBool()},
+        {QStringLiteral("recordingAudioMicrophone"), settings.value(QStringLiteral("recordingAudioMicrophone"), true).toBool()},
+        {QStringLiteral("recordingAudioSystem"), settings.value(QStringLiteral("recordingAudioSystem"), true).toBool()},
         {QStringLiteral("downloadDirectory"), directory}
     });
 }
@@ -208,11 +273,15 @@ QVariantMap SettingsService::save(const QVariantMap& settings)
     QVariantMap candidate = data();
     for (auto iterator = settings.cbegin(); iterator != settings.cend(); ++iterator)
         candidate.insert(iterator.key(), iterator.value());
-    const QVariantMap validation = validate(candidate);
+    // 即时语言等独立设置不依赖下载磁盘在线；实际修改目录时仍探测可写性。
+    const QVariantMap validation = validateValues(candidate, settings.contains(QStringLiteral("downloadDirectory")));
     if (!validation.value(QStringLiteral("ok")).toBool())
         return validation;
     candidate = validation.value(QStringLiteral("data")).toMap();
     QJsonObject document = m_document;
+    document.insert(QStringLiteral("language"), candidate.value(QStringLiteral("language")).toString());
+    document.insert(QStringLiteral("sidebar_collapsed"), candidate.value(QStringLiteral("sidebarCollapsed")).toBool());
+    document.insert(QStringLiteral("navigation_items"), QJsonArray::fromVariantList(candidate.value(QStringLiteral("navigationItems")).toList()));
     document.insert(QStringLiteral("auto_start"), candidate.value(QStringLiteral("autoStart")).toBool());
     document.insert(QStringLiteral("tree_view_font_size"), candidate.value(QStringLiteral("fontSize")).toInt());
     document.insert(QStringLiteral("hotkey_modifier"), candidate.value(QStringLiteral("hotkeyModifier")).toInt());
@@ -220,6 +289,9 @@ QVariantMap SettingsService::save(const QVariantMap& settings)
     document.insert(QStringLiteral("screenshot_hotkey_modifier"), candidate.value(QStringLiteral("screenshotHotkeyModifier")).toInt());
     document.insert(QStringLiteral("screenshot_hotkey_key"), candidate.value(QStringLiteral("screenshotHotkeyKey")).toInt());
     document.insert(QStringLiteral("screenshot_enabled"), candidate.value(QStringLiteral("screenshotEnabled")).toBool());
+    document.insert(QStringLiteral("recording_audio_enabled"), candidate.value(QStringLiteral("recordingAudioEnabled")).toBool());
+    document.insert(QStringLiteral("recording_audio_microphone"), candidate.value(QStringLiteral("recordingAudioMicrophone")).toBool());
+    document.insert(QStringLiteral("recording_audio_system"), candidate.value(QStringLiteral("recordingAudioSystem")).toBool());
     document.insert(QStringLiteral("download_directory"), candidate.value(QStringLiteral("downloadDirectory")).toString());
     if (!QDir().mkpath(QFileInfo(m_path).absolutePath()))
         return ServiceResult::failure(QStringLiteral("无法创建设置目录。"));

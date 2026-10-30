@@ -6,6 +6,9 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' qrc:; style-src 'self' 'unsafe-inline'; img-src data: qrc:; font-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
   <title>桌面工具</title>
   <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="navigation.css">
+  <script defer src="i18n-en.js"></script>
+  <script defer src="i18n.js"></script>
   <script defer src="qrc:///qtwebchannel/qwebchannel.js"></script>
   <script defer src="bridge.js"></script>
   <script defer src="downloads.js"></script>
@@ -16,23 +19,39 @@
   <script defer src="gridmap.js"></script>
   <script defer src="qr.js"></script>
   <script defer src="screenshot.js"></script>
+  <script defer src="recording.js"></script>
+  <script defer src="browser.js"></script>
+  <script defer src="filesearch.js"></script>
+  <script defer src="dist/terrain-page.js"></script>
+  <script defer src="icons.js"></script>
+  <script defer src="navigation.js"></script>
+  <script defer src="bookmark-host.js"></script>
   <script defer src="app.js"></script>
+  <script defer src="level-layout.js"></script>
 </head>
 <body>
   <div class="app-shell">
     <aside class="sidebar" aria-label="主导航">
+      <button id="sidebar-toggle" class="sidebar-toggle icon-button" type="button" aria-label="收起工具栏" aria-expanded="true" title="收起工具栏" data-icon="sidebar"></button>
       <div class="brand"><span class="brand-mark" aria-hidden="true">⌘</span><div><strong>桌面工具</strong><span>让日常井然有序</span></div></div>
       <div class="nav-label">工作空间</div>
       <nav class="main-nav">
         <button class="nav-button active" data-page="shortcuts" aria-current="page"><span aria-hidden="true">↗</span>快捷方式<span class="nav-count" id="shortcut-count">0</span></button>
         <button class="nav-button" data-page="notes"><span aria-hidden="true">▤</span>便签<span class="nav-count" id="note-count">0</span></button>
+        <button class="nav-button" id="open-bookmark-window" data-page="bookmarks"><span aria-hidden="true">🔖</span>网页书签<span class="nav-count" id="bookmark-count">0</span></button>
         <button class="nav-button" data-page="emoji"><span aria-hidden="true">☺</span>表情<span class="nav-count" id="emoji-count">0</span></button>
         <button class="nav-button" data-page="downloads"><span aria-hidden="true">↓</span>下载<span class="nav-count" id="download-count">0</span></button>
         <button class="nav-button" data-page="clipboard"><span aria-hidden="true">▣</span>剪贴板<span class="nav-count" id="clipboard-count">0</span></button>
         <button class="nav-button" data-page="wallpaper"><span aria-hidden="true">❋</span>壁纸<span class="nav-count" id="wallpaper-count">0</span></button>
 <button class="nav-button" data-page="gridmap"><span aria-hidden="true">▦</span>网格图<span class="nav-count" id="gridmap-count">0</span></button>
+        <button class="nav-button" data-page="terrain"><span aria-hidden="true">🗻</span>地形<span class="nav-count" id="terrain-count">0</span></button>
+        <button class="nav-button" data-page="level-layout"><span aria-hidden="true">◇</span>关卡布局<span class="nav-count" id="level-layout-count">0</span></button>
+        <button class="nav-button" data-page="paint"><span aria-hidden="true">✎</span>画板</button>
         <button class="nav-button" data-page="qr"><span aria-hidden="true">▩</span>二维码<span class="nav-count" id="qr-count">0</span></button>
         <button class="nav-button" data-page="screenshot"><span aria-hidden="true">✂</span>截图<span class="nav-count" id="screenshot-count">0</span></button>
+        <button class="nav-button" data-page="recording"><span aria-hidden="true">◉</span>录屏<span class="nav-count" id="recording-count">0</span></button>
+        <button class="nav-button" data-page="browser"><span aria-hidden="true">◫</span>资源浏览器</button>
+        <button class="nav-button" data-page="filesearch"><span aria-hidden="true">⌕</span>文件检索<span class="nav-count" id="filesearch-count">0</span></button>
         <button class="nav-button" data-page="settings"><span aria-hidden="true">⚙</span>设置</button>
       </nav>
       <div class="sidebar-bottom"><span class="status-dot" id="connection-dot"></span><span id="connection-status">正在连接桌面程序…</span><span class="version" id="app-version"></span></div>
@@ -40,6 +59,7 @@
     <main id="main-content" class="main-content">
       <div id="connection-error" class="connection-error" role="alert" hidden><strong>请从桌面程序打开</strong><p>此页面需要连接 Qt 后端。请启动桌面工具程序，以使用文件、便签和系统设置功能。</p><button id="retry-connection" class="button secondary">重新连接</button></div>
       <div class="workspace" id="workspace" inert>
+        <section class="page bookmark-host" id="page-bookmarks" aria-label="网页书签" hidden><p id="bookmark-host-error" role="alert"></p></section>
         <section class="page" id="page-shortcuts" aria-labelledby="shortcuts-heading">
           <header class="page-header"><div><div class="eyebrow">QUICK ACCESS</div><h1 id="shortcuts-heading">快捷方式</h1><p>常用文件、目录和网站，一处直达。</p></div><button id="add-shortcut" class="button primary"><span aria-hidden="true">＋</span>添加快捷方式</button></header>
           <div class="notice-list" id="shortcut-warnings"></div>
@@ -173,6 +193,37 @@
             </div>
           </div>
         </section>
+<section class="page" id="page-level-layout" aria-labelledby="level-layout-heading" hidden>
+          <header class="page-header"><div><div class="eyebrow">LEVEL LAYOUT</div><h1 id="level-layout-heading">关卡布局</h1><p>用可编辑的点、线、面规划游戏空间，搭配绿化、道路与家具预设，导出图片或 SVG 矢量图。</p></div><div class="header-actions"><button id="refresh-level-layout" class="button secondary">刷新</button><button id="import-level-layout" class="button secondary">导入项目</button><button id="new-level-layout" class="button primary">新建关卡布局</button></div></header>
+          <div id="level-layout-error" class="notice warning" role="alert" hidden></div>
+          <div id="level-layout-list" class="level-project-list"></div>
+          <p class="muted">独立启动：应用目录中的 DesktopToolLevelEditor.exe。默认保存的项目与此列表共享；外部项目可通过“导入项目”加入列表。</p>
+        </section>
+<section class="page" id="page-paint" aria-labelledby="paint-heading" hidden>
+          <header class="page-header"><div><div class="eyebrow">PAINT</div><h1 id="paint-heading">画板</h1><p>用鼠标或数位笔记录灵感，绘制草图并保存为图片。</p></div><button id="open-paint-window" class="button primary">打开画板</button></header>
+          <div class="empty-state"><div class="empty-icon" aria-hidden="true">✎</div><h2>画笔、形状与自由创作</h2><p>支持画笔、橡皮、填充、取色、直线、矩形、椭圆、文字、撤销重做和缩放。</p><p>在独立窗口中打开图片，或新建画布，保存为 PNG、JPEG、BMP。</p><h2>无屏数位板也能轻松定位</h2><p>开启「数位板模式」后，笔尖接触或按住鼠标左键只移动光标。额外按住空格键才绘制，松开立即断笔。</p><p>控制键可选空格、Shift、F、D、A；再次按下从当前位置起笔，不连接定位轨迹。</p></div>
+        </section>
+<section class="page terrain-page" id="page-terrain" aria-labelledby="terrain-heading" hidden>
+          <header class="page-header"><div><div class="eyebrow">TERRAIN</div><h1 id="terrain-heading">地形</h1><p>为游戏关卡制作山地、河流、道路、湖泊与海岸；高度数据以米为单位，可导出 16 位灰度高度图。</p></div><button id="add-terrain" class="button primary"><span aria-hidden="true">＋</span>新建地形项目</button></header>
+          <div id="terrain-error" class="notice warning" role="alert" hidden></div>
+          <div class="terrain-layout">
+            <aside class="terrain-browser" aria-label="地形项目列表">
+              <div id="terrain-list" class="terrain-list"></div>
+            </aside>
+            <div class="terrain-stage">
+              <div id="terrain-preview-empty" class="empty-state"><div class="empty-icon" aria-hidden="true">🗻</div><h2>选择一个地形项目</h2><p>点击左侧项目查看三维缩略预览；双击项目或预览模型打开独立编辑窗口。</p></div>
+              <div id="terrain-preview-panel" class="terrain-preview-panel" hidden>
+                <div class="terrain-preview-wrap"><canvas id="terrain-preview-canvas"></canvas><span id="terrain-preview-note" class="muted terrain-preview-note" role="status"></span></div>
+                <div class="terrain-info-row"><span id="terrain-info" class="muted">—</span></div>
+                <div class="terrain-actions header-actions" id="terrain-actions" hidden>
+                  <button id="terrain-open" class="button primary">打开编辑窗口</button>
+                  <button id="terrain-rename" class="button secondary">重命名</button>
+                  <button id="terrain-delete" class="button danger quiet">删除</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
         <section class="page qr-page" id="page-qr" aria-labelledby="qr-heading" hidden>
           <header class="page-header"><div><div class="eyebrow">QR CODE READER</div><h1 id="qr-heading">二维码识别</h1><p>打开本地图片或粘贴剪贴板二维码，一键识别内容并随时复制。</p></div></header>
           <div id="qr-error" class="notice warning" role="alert" hidden></div>
@@ -225,13 +276,91 @@
           <div id="screenshot-list" class="screenshot-list" aria-label="截图历史"></div>
           <div id="screenshot-empty" class="empty-state"><div class="empty-icon" aria-hidden="true">✂</div><h2>还没有截图</h2><p>按截图热键或点击“开始截图”，框选区域并标注后，截图会出现在这里。</p></div>
         </section>
+        <section class="page recording-page" id="page-recording" aria-labelledby="recording-heading" hidden>
+          <header class="page-header"><div><div class="eyebrow">SCREEN RECORDING</div><h1 id="recording-heading">录屏</h1><p>点击按钮后拖拽框选屏幕区域，控制条在区域外提供暂停与结束；完成的视频自动保存到数据目录并复制到剪贴板。</p></div><button id="recording-start" class="button primary"><span aria-hidden="true">◉</span>开始录屏</button></header>
+          <div id="recording-error" class="notice warning" role="alert" hidden></div>
+          <fieldset class="screenshot-hotkey-card recording-audio-card">
+            <legend>录制音频</legend>
+            <div class="screenshot-enable-row">
+              <label class="check-label"><input id="recording-audio-enabled" type="checkbox">录制音频</label>
+              <span id="recording-audio-state" class="muted" role="status"></span>
+            </div>
+            <div class="recording-audio-sources" id="recording-audio-sources">
+              <label class="check-label"><input id="recording-audio-microphone" type="checkbox" checked>麦克风</label>
+              <label class="check-label"><input id="recording-audio-system" type="checkbox" checked>系统声音（扬声器播放的内容）</label>
+            </div>
+            <p class="field-help">勾选后立即生效；两个来源可同时录制并自动混音。关闭“录制音频”时仅保存画面，来源全部不可用时录制会取消。</p>
+          </fieldset>
+          <div class="screenshot-list-heading"><h2>录屏记录</h2><span id="recording-summary" class="muted">0 段</span><button id="recording-clear" class="button danger quiet" disabled>清空记录</button></div>
+          <div id="recording-list" class="recording-list" aria-label="录屏历史"></div>
+          <div id="recording-empty" class="empty-state"><div class="empty-icon" aria-hidden="true">◉</div><h2>还没有录屏</h2><p>点击“开始录屏”，框选区域并录制；视频会保存到数据目录、复制到剪贴板，并出现在这里。</p></div>
+        </section>
+        <section class="page browser-page" id="page-browser" aria-labelledby="browser-heading" hidden>
+          <header class="page-header"><div><div class="eyebrow">RESOURCE BROWSER</div><h1 id="browser-heading">资源浏览器</h1><p>使用独立图像浏览器和视频播放器；设置为默认应用后，双击文件即可打开，无需启动主程序。</p></div></header>
+          <div id="browser-error" class="notice warning" role="alert" hidden></div>
+          <div class="browser-cards">
+            <fieldset class="browser-card">
+              <legend>图像浏览器</legend>
+              <div class="browser-card-main">
+                <div class="browser-card-info">
+                  <strong>查看图片</strong>
+                  <p>使用独立图像浏览器：支持放大缩小、旋转、拖动，并可在同目录图片间切换。</p>
+                  <p class="browser-formats"><span class="browser-formats-label">支持格式：</span><span id="browser-image-formats" class="muted">加载中…</span></p>
+                </div>
+                <div class="browser-card-actions">
+                  <button id="browser-open-image" class="button primary"><span aria-hidden="true">＋</span>打开图片</button>
+                  <button id="browser-open-folder" class="button secondary">打开文件夹</button>
+                </div>
+              </div>
+              <div class="browser-default-row">
+                <span id="browser-image-default-state" class="muted" role="status"></span>
+                <button id="browser-image-openwith" class="button secondary small browser-manual-button">选择文件类型并设置默认应用…</button>
+              </div>
+              <p class="field-help">选择需要关联的图片格式，在 Windows 设置中确认后，双击这些文件即可使用本程序打开。</p>
+            </fieldset>
+            <fieldset class="browser-card">
+              <legend>视频浏览器</legend>
+              <div class="browser-card-main">
+                <div class="browser-card-info">
+                  <strong>播放视频</strong>
+                  <p>支持调节进度与播放倍速、控制音量、全屏播放，并可在同目录视频间切换。</p>
+                  <p class="browser-formats"><span class="browser-formats-label">支持格式：</span><span id="browser-video-formats" class="muted">加载中…</span></p>
+                </div>
+                <div class="browser-card-actions">
+                  <button id="browser-open-video" class="button primary"><span aria-hidden="true">＋</span>打开视频</button>
+                </div>
+              </div>
+              <div class="browser-default-row">
+                <span id="browser-video-default-state" class="muted" role="status"></span>
+                <button id="browser-video-openwith" class="button secondary small browser-manual-button">选择文件类型并设置默认应用…</button>
+              </div>
+              <p class="field-help">选择需要关联的视频格式，在 Windows 设置中确认后，双击这些文件即可使用本程序播放。</p>
+            </fieldset>
+          </div>
+          <div class="browser-folder">
+            <div class="browser-folder-heading"><h2>文件夹内容</h2><span id="browser-folder-summary" class="muted">未选择文件夹</span></div>
+            <div id="browser-folder-error" class="notice warning" role="alert" hidden></div>
+            <div id="browser-file-list" class="browser-file-list" aria-label="文件夹中的图片和视频"></div>
+            <div id="browser-folder-empty" class="empty-state"><div class="empty-icon" aria-hidden="true">◫</div><h2>还没有选择文件夹</h2><p>点击“打开文件夹”浏览其中的图片和视频，点击条目即可在对应浏览器中打开。</p></div>
+          </div>
+        </section>
+        <section class="page filesearch-page" id="page-filesearch" aria-labelledby="filesearch-heading" hidden>
+          <header class="page-header"><div><div class="eyebrow">FILE SEARCH</div><h1 id="filesearch-heading">文件检索</h1><p>输入全部或部分文件名，即时查找本机文件与文件夹；结果可直接打开、定位或复制路径。</p></div><button id="filesearch-enable-service" class="button primary" hidden>启用高速索引服务</button><button id="filesearch-rebuild" class="button secondary">重建索引</button></header>
+          <div id="filesearch-error" class="notice warning" role="alert" hidden></div>
+          <div class="section-toolbar filesearch-toolbar"><label class="search-field filesearch-field"><span aria-hidden="true">⌕</span><input id="filesearch-input" type="search" placeholder="例如：方案评审、年度总结*.docx、ext:pdf folder:" aria-label="检索文件名" autocomplete="off" spellcheck="false"></label><label class="check-label filesearch-path-option"><input id="filesearch-path" type="checkbox">匹配完整路径</label></div>
+          <div id="filesearch-status" class="filesearch-status muted" role="status">正在读取索引状态…</div>
+          <div id="filesearch-results" class="filesearch-results" aria-label="检索结果"></div>
+          <div id="filesearch-empty" class="empty-state" hidden><div class="empty-icon" aria-hidden="true">⌕</div><h2>输入关键词开始检索</h2><p>空格分隔多个关键词（全部包含）；*.docx 通配整个名称；ext:pdf 限定扩展名；folder:/file: 只看文件夹/文件。</p></div>
+          <div class="clipboard-pagination filesearch-pagination"><button id="filesearch-more" class="button secondary" hidden>加载更多</button><span id="filesearch-summary" class="muted"></span></div>
+        </section>
         <section class="page settings-page" id="page-settings" aria-labelledby="settings-heading" hidden>
           <header class="page-header"><div><div class="eyebrow">PREFERENCES</div><h1 id="settings-heading">设置</h1><p>调整适合自己的工作方式。</p></div></header>
           <form id="settings-form" class="settings-card">
             <div class="settings-section"><h2>启动</h2><div class="setting-row"><div><label for="auto-start">开机自启</label><p id="auto-start-help">勾选后，在当前用户登录 Windows 时自动启动。点击“保存设置”生效。</p></div><input id="auto-start" type="checkbox" aria-describedby="auto-start-help"></div></div>
-            <div class="settings-section"><h2>界面</h2><div class="setting-row"><div><label for="font-size">字体大小</label><p>应用于列表和便签内容，单位为像素。</p></div><div class="number-control"><input id="font-size" type="number" min="8" max="32" value="16" required><span>px</span></div></div></div>
+            <div class="settings-section"><h2>界面</h2><div class="setting-row"><div><label for="interface-language">界面语言</label><p>立即生效，无需重启；不会翻译用户内容。</p></div><select id="interface-language"><option value="zh-CN">简体中文</option><option value="en">English</option></select></div><div class="setting-row"><div><label for="font-size">字体大小</label><p>应用于列表和便签内容，单位为像素。</p></div><div class="number-control"><input id="font-size" type="number" min="8" max="32" value="16" required><span>px</span></div></div></div>
             <div class="settings-section"><h2>快捷键</h2><div class="setting-row"><div><label for="hotkey-input">唤起桌面工具</label><p>点击输入框后，按下需要的按键组合。</p></div><input id="hotkey-input" class="hotkey-input" type="text" readonly value="F8" aria-describedby="hotkey-help"></div><p class="field-help" id="hotkey-help">支持 Ctrl、Alt、Shift、Win 和功能键；按 Tab 可离开输入框。</p><div id="hotkey-warning" class="notice warning" hidden></div></div>
             <div class="settings-section"><h2>下载</h2><label class="form-field settings-directory" for="download-default-directory"><span>默认下载目录</span><div class="input-with-button"><input id="download-default-directory" type="text" placeholder="选择默认下载目录" autocomplete="off" spellcheck="false"><button id="choose-default-download-directory" type="button" class="button secondary">选择目录…</button></div></label><p class="field-help">创建任务未指定有效目录时，文件将保存到这里。修改后点击“保存设置”生效。</p></div>
+            <div class="settings-section"><h2>功能列表</h2><p class="field-help">用上下箭头调整顺序，取消勾选可隐藏功能入口。保存设置后生效；设置入口始终保留。</p><div id="feature-settings-list"></div></div>
             <div class="settings-actions"><button type="submit" class="button primary">保存设置</button><button id="reset-settings" type="button" class="button secondary">恢复默认</button><span id="settings-save-state" class="muted" role="status"></span></div>
           </form>
           <div class="settings-card data-card"><h2>本地数据</h2><p class="muted">快捷方式、便签、表情库、剪贴板历史、设置和下载记录保存在此设备。表情图片与下载文件保存在各自的原位置。</p><code id="data-path" class="data-path">正在读取…</code><button id="open-data-directory" class="button secondary">打开数据目录 ↗</button></div>
@@ -258,7 +387,19 @@
   <dialog id="clipboard-dialog" class="app-dialog clipboard-dialog" aria-labelledby="clipboard-dialog-title"><div class="dialog-heading"><h2 id="clipboard-dialog-title">剪贴板详情</h2><button id="clipboard-dialog-close" class="icon-button" aria-label="关闭剪贴板详情">×</button></div><div id="clipboard-dialog-body"></div><div class="dialog-actions"><button id="clipboard-dialog-cancel" class="button secondary">关闭</button><button id="clipboard-dialog-confirm" class="button danger primary" hidden>确认删除</button></div><p id="clipboard-dialog-error" class="field-error" role="alert" hidden></p></dialog>
   <dialog id="emoji-dialog" class="app-dialog" aria-labelledby="emoji-dialog-title"><form id="emoji-dialog-form"><div class="dialog-heading"><h2 id="emoji-dialog-title">表情</h2><button id="emoji-dialog-close" type="button" class="icon-button" aria-label="关闭表情对话框">×</button></div><div id="emoji-dialog-body"></div><p id="emoji-dialog-error" class="field-error" role="alert" hidden></p><div class="dialog-actions"><button id="emoji-dialog-cancel" type="button" class="button secondary">取消</button><button id="emoji-dialog-confirm" type="submit" class="button primary">保存</button></div></form></dialog>
   <dialog id="wallpaper-dialog" class="app-dialog" aria-labelledby="wallpaper-dialog-title"><form id="wallpaper-dialog-form"><div class="dialog-heading"><h2 id="wallpaper-dialog-title">动态壁纸</h2><button id="wallpaper-dialog-close" type="button" class="icon-button" aria-label="关闭动态壁纸对话框">×</button></div><div id="wallpaper-dialog-body"></div><p id="wallpaper-dialog-error" class="field-error" role="alert" hidden></p><div class="dialog-actions"><button id="wallpaper-dialog-cancel" type="button" class="button secondary">取消</button><button id="wallpaper-dialog-confirm" type="submit" class="button primary">保存</button></div></form></dialog>
+  <dialog id="terrain-dialog" class="app-dialog" aria-labelledby="terrain-dialog-title"><form id="terrain-dialog-form"><div class="dialog-heading"><h2 id="terrain-dialog-title">地形项目</h2><button id="terrain-dialog-close" type="button" class="icon-button" aria-label="关闭地形项目对话框">×</button></div><div id="terrain-dialog-body"></div><p id="terrain-dialog-error" class="field-error" role="alert" hidden></p><div class="dialog-actions"><button id="terrain-dialog-cancel" type="button" class="button secondary">取消</button><button id="terrain-dialog-submit" type="submit" class="button primary">保存</button></div></form></dialog>
   <dialog id="gridmap-dialog" class="app-dialog" aria-labelledby="gridmap-dialog-title"><form id="gridmap-dialog-form"><div class="dialog-heading"><h2 id="gridmap-dialog-title">网格图</h2><button id="gridmap-dialog-close" type="button" class="icon-button" aria-label="关闭网格图对话框">×</button></div><div id="gridmap-dialog-body"></div><p id="gridmap-dialog-error" class="field-error" role="alert" hidden></p><div class="dialog-actions"><button id="gridmap-dialog-cancel" type="button" class="button secondary">取消</button><button id="gridmap-dialog-confirm" type="submit" class="button primary">保存</button></div></form></dialog>
-  <dialog id="screenshot-dialog" class="app-dialog screenshot-dialog" aria-labelledby="screenshot-dialog-title"><div class="dialog-heading"><h2 id="screenshot-dialog-title">截图详情</h2><button id="screenshot-dialog-close" class="icon-button" aria-label="关闭截图预览">×</button></div><p id="screenshot-dialog-meta" class="muted"></p><div class="screenshot-preview"><img id="screenshot-dialog-image" alt="截图原图"></div><div class="dialog-actions"><button id="screenshot-dialog-copy" class="button secondary">复制图片</button><button id="screenshot-dialog-cancel" class="button primary">关闭</button></div></dialog>
+  <dialog id="browser-openwith-dialog" class="app-dialog" aria-labelledby="browser-openwith-title">
+    <div class="dialog-heading"><h2 id="browser-openwith-title">手动设置默认打开方式</h2><button id="browser-openwith-close" type="button" class="icon-button" aria-label="关闭手动设置对话框">×</button></div>
+    <p class="dialog-description">勾选希望由资源浏览器打开的格式，再前往 Windows 默认应用设置确认。此处会显示系统实际生效的打开程序。</p>
+    <div class="browser-wizard-row">
+      <button id="browser-openwith-wizard" class="button primary small">打开系统默认应用设置</button>
+      <button id="browser-openwith-resume" class="button secondary small">刷新状态</button>
+      <span id="browser-openwith-progress" class="muted" role="status"></span>
+    </div>
+    <div><button id="browser-openwith-all" class="button secondary small">全选</button> <button id="browser-openwith-none" class="button secondary small">全不选</button></div>
+    <div id="browser-openwith-grid" class="browser-openwith-grid" role="group" aria-label="支持的文件类型"></div>
+    <div class="dialog-actions"><button id="browser-openwith-cancel" type="button" class="button secondary">关闭</button></div>
+  </dialog>
 </body>
 </html>

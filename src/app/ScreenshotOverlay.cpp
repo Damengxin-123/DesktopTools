@@ -1,3 +1,4 @@
+#include "InterfaceLanguage.h"
 #include "ScreenshotOverlay.h"
 
 #include <QButtonGroup>
@@ -99,11 +100,11 @@ void ScreenshotOverlay::createToolbar()
 
     auto* widthBox = new QComboBox(m_toolbar);
     widthBox->setFocusPolicy(Qt::NoFocus);
-    widthBox->addItem(QStringLiteral("细"), int(kWidths[0]));
-    widthBox->addItem(QStringLiteral("中"), int(kWidths[1]));
-    widthBox->addItem(QStringLiteral("粗"), int(kWidths[2]));
+    widthBox->addItem(InterfaceLanguage::text(QStringLiteral("细")), int(kWidths[0]));
+    widthBox->addItem(InterfaceLanguage::text(QStringLiteral("中")), int(kWidths[1]));
+    widthBox->addItem(InterfaceLanguage::text(QStringLiteral("粗")), int(kWidths[2]));
     widthBox->setCurrentIndex(1);
-    widthBox->setToolTip(QStringLiteral("笔画粗细 / 文字字号"));
+    InterfaceLanguage::bind(widthBox, "toolTip", QStringLiteral("笔画粗细 / 文字字号"));
     connect(widthBox, &QComboBox::activated, this, [this, widthBox](int index) {
         m_width = widthBox->itemData(index).toDouble();
         m_fontSize = kFontSizes[index];
@@ -112,7 +113,7 @@ void ScreenshotOverlay::createToolbar()
 
     auto* undo = new QToolButton(m_toolbar);
     undo->setText(QStringLiteral("↶"));
-    undo->setToolTip(QStringLiteral("撤销上一步标注"));
+    InterfaceLanguage::bind(undo, "toolTip", QStringLiteral("撤销上一步标注"));
     undo->setFocusPolicy(Qt::NoFocus);
     connect(undo, &QToolButton::clicked, this, [this]() {
         if (!m_strokes.isEmpty())
@@ -122,11 +123,13 @@ void ScreenshotOverlay::createToolbar()
     layout->addWidget(undo);
 
     layout->addSpacing(6);
-    auto* cancel = new QPushButton(QStringLiteral("✕ 取消"), m_toolbar);
+    auto* cancel = new QPushButton(InterfaceLanguage::text(QStringLiteral("✕ 取消")), m_toolbar);
+    InterfaceLanguage::bind(cancel, "text", QStringLiteral("✕ 取消"));
     cancel->setFocusPolicy(Qt::NoFocus);
     connect(cancel, &QPushButton::clicked, this, [this]() { cancelCapture(); });
     layout->addWidget(cancel);
-    auto* confirm = new QPushButton(QStringLiteral("✓ 完成"), m_toolbar);
+    auto* confirm = new QPushButton(InterfaceLanguage::text(QStringLiteral("✓ 完成")), m_toolbar);
+    InterfaceLanguage::bind(confirm, "text", QStringLiteral("✓ 完成"));
     confirm->setFocusPolicy(Qt::NoFocus);
     confirm->setStyleSheet(QStringLiteral(
         "QPushButton{background:#315ee7;color:#fff;border-color:#315ee7;font-weight:600;}"
@@ -222,6 +225,22 @@ void ScreenshotOverlay::startNewSelection(const QPointF& position)
     m_drag = DragRubberBand;
     m_pressPos = position;
     m_selection = QRectF();
+    // 旧选区被替换：锚定其上的工具栏随旧选区一起消失，松开时按新选区重新摆放。
+    m_toolbar->hide();
+    // 多显示器下其余屏幕的遮罩也要收起各自的旧选区。
+    emit newSelectionStarted();
+}
+
+void ScreenshotOverlay::dismissSelection()
+{
+    if (m_finished)
+        return;
+    // 另一块屏幕开始重新框选：本屏的旧选区与工具栏一并收起，回到待框选状态。
+    commitTextEditor();
+    m_state = Selecting;
+    m_selection = QRectF();
+    m_toolbar->hide();
+    update();
 }
 
 void ScreenshotOverlay::updateToolbarGeometry()
@@ -357,7 +376,7 @@ void ScreenshotOverlay::paintEvent(QPaintEvent* event)
         painter.drawText(box, Qt::AlignCenter, label);
     } else {
         // 尚未选择区域时在顶部显示操作提示。
-        const QString hint = QStringLiteral("拖拽选择截图区域 · 框外拖动重新选区 · 右键或 Esc 取消");
+        const QString hint = InterfaceLanguage::text(QStringLiteral("拖拽选择截图区域 · 框外拖动重新选区 · 右键或 Esc 取消"));
         painter.setFont(font());
         const QFontMetrics metrics(font());
         const QSize textSize = metrics.size(Qt::TextSingleLine, hint);
@@ -459,6 +478,8 @@ void ScreenshotOverlay::mousePressEvent(QMouseEvent* event)
         m_drag = DragRubberBand;
         m_pressPos = position;
         m_selection = QRectF();
+        // 首次框选同样要收起其余屏幕遮罩的旧选区。
+        emit newSelectionStarted();
         update();
         return;
     }
@@ -553,6 +574,8 @@ void ScreenshotOverlay::mouseReleaseEvent(QMouseEvent* event)
         return;
     const QPointF position = event->position();
     if (m_drag == DragRubberBand) {
+        // 松开后必须结束框选：鼠标跟踪开着，不重置的话后续移动会继续改选区。
+        m_drag = DragNone;
         m_selection = QRectF(m_pressPos, position).normalized();
         if (m_selection.width() < kMinimumSelection || m_selection.height() < kMinimumSelection) {
             // 过小的拖拽视为误触：恢复原选区；原本没有选区时回到初始状态。

@@ -1,0 +1,8 @@
+<RCC>
+  <qresource prefix="/web">
+    <file alias="i18n-en.json">../web/i18n-en.json</file>
+  </qresource>
+  <qresource prefix="/images">
+    <file alias="app_icon.ico">images/app_icon.ico</file>
+  </qresource>
+</RCC>
