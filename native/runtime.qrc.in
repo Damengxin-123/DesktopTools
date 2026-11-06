@@ -1,0 +1,15 @@
+<RCC>
+  <qresource prefix="/web">
+    <file alias="i18n-en.json">@CMAKE_CURRENT_SOURCE_DIR@/web/i18n-en.json</file>
+    <file alias="wallpaper.html">@CMAKE_CURRENT_SOURCE_DIR@/web/wallpaper.html</file>
+    <file alias="wallpaper-layout.js">@CMAKE_CURRENT_SOURCE_DIR@/web/wallpaper-layout.js</file>
+  </qresource>
+  <qresource prefix="/document">
+    <file alias="editor.html">@CMAKE_CURRENT_SOURCE_DIR@/document/editor.html</file>
+    <file alias="editor.css">@CMAKE_CURRENT_SOURCE_DIR@/document/editor.css</file>
+    <file alias="editor.js">@CMAKE_CURRENT_SOURCE_DIR@/document/editor.js</file>
+  </qresource>
+  <qresource prefix="/images">
+    <file alias="app_icon.png">@CMAKE_CURRENT_SOURCE_DIR@/resources/images/app_icon.png</file>
+  </qresource>
+</RCC>

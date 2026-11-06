@@ -1,0 +1,24 @@
+config_version=5
+
+[application]
+config/name="DesktopTool · 桌面工具"
+run/main_scene="res://workbench.tscn"
+config/features=PackedStringArray("4.6", "GL Compatibility")
+config/use_custom_user_dir=true
+config/custom_user_dir_name="DesktopToolGodot"
+
+[display]
+window/size/viewport_width=1280
+window/size/viewport_height=920
+window/size/window_width_override=1280
+window/size/window_height_override=920
+window/size/min_width=980
+window/size/min_height=690
+window/stretch/mode="canvas_items"
+window/stretch/aspect="expand"
+window/subwindows/embed_subwindows=true
+
+[rendering]
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
+environment/defaults/default_clear_color=Color(0.032, 0.044, 0.078, 1)
